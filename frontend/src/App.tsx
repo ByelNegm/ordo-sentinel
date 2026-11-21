@@ -154,7 +154,7 @@ export default function App() {
     }
   }
   const result = (key: string) => results[key] && <div className={`action-result ${results[key].error ? 'error-result' : ''}`} role={results[key].error ? 'alert' : 'status'}>
-    {results[key].error ? <TriangleAlert size={14} /> : <Check size={14} />}<span>{display.humanize(results[key].text)}</span>
+    {results[key].error ? <TriangleAlert size={14} /> : <Check size={14} />}<span className={results[key].text.startsWith('HTTP 403') ? 'forbidden' : ''}>{display.humanize(results[key].text)}</span>
   </div>
   const actionButton = (key: string, title: string, path: string, style = '', disabled = false, body?: unknown) =>
     <button data-action={key} className={`button ${style}`} disabled={!!pending || disabled || !overview} onClick={() => { void act(key, path, body) }}>
@@ -197,6 +197,7 @@ export default function App() {
           <div className="metric"><span><ArrowUpRight size={16} /> TOTAL DEBITS</span><strong className="money">{overview ? money(overview.totals.debits_minor) : '—'}</strong><div>{overview?.totals.ledger_entries ?? '—'} append-only journal entries</div></div>
           <div className="metric"><span><ArrowDownLeft size={16} /> TOTAL CREDITS</span><strong className="money">{overview ? money(overview.totals.credits_minor) : '—'}</strong><div className={balanced === null ? '' : balanced ? 'green-text' : 'red-text'}>{balanced === null ? 'Waiting for ledger' : balanced ? '✓ Debits equal credits' : 'Debits and credits differ'}<b className="balanced-note">Balanced ≠ correct</b></div></div>
         </div>
+        {overview && <div className={`balance-banner ${status === 'healthy' ? '' : 'alert'}`}><strong>{balanced ? 'Debits = credits.' : 'Debits ≠ credits.'}</strong> {status === 'healthy' ? 'A balanced ledger alone does not prove correctness — balanced ≠ correct.' : balanced ? `The ledger still balances, but integrity is ${status?.toUpperCase()} — balanced ≠ correct.` : `Integrity is ${status?.toUpperCase()}.`}</div>}
         <Panel title="Independent integrity checks" note={<span className="subtle">{passed ?? '—'} OF 7 PASSING · INSTRUCTION-LED RECONCILIATION</span>}>
           {integrity ? <Checks checks={integrity.checks} /> : <Empty>Loading independent integrity checks…</Empty>}
         </Panel>
@@ -240,7 +241,7 @@ export default function App() {
         {!incident ? <Panel title="Investigation workspace"><Empty>No incidents. Monitoring independent payment intent for integrity violations.</Empty></Panel> : <>
           <p className="incident-summary" data-testid="incident-summary">{incident.summary_text ?? 'Reconstructing the payment from independent evidence…'}</p>
           <div className="incident-header"><span className="cyan-text">Settlement recovery</span><span>{label(incident.type)}</span><Badge value={incident.status}><span data-testid="incident-status">{label(incident.status)}</span></Badge><span className="subtle">NEWEST INCIDENT · {incidents.length} TOTAL</span></div>
-          <div className="stepper">{stages.map((stage, index) => <div key={stage} className={incident.status === stage ? 'step current' : stages.indexOf(incident.status) > index ? 'step done' : 'step'}><span>{stages.indexOf(incident.status) > index ? <Check size={13} /> : String(index + 1).padStart(2, '0')}</span><b>{label(stage)}</b></div>)}</div>
+          <div className="stepper">{stages.map((stage, index) => <div key={stage} className={incident.status === stage ? 'step current' : stages.indexOf(incident.status) > index ? 'step done' : 'step'}><span>{stages.indexOf(incident.status) > index ? <Check size={13} /> : String(index + 1).padStart(2, '0')}</span><b>{label(stage)}</b></div>)}{['rejected', 'failed'].includes(incident.status) && <div className="step terminal"><span>✕</span><b>{label(incident.status)}</b></div>}</div>
           <div className="investigation-grid">
             <Panel title="Root cause" note={<span className="method">{incident.root_cause.method === 'deterministic' ? 'Deterministic' : incident.root_cause.method}</span>}>
               <div className="root-cause"><div className="root-service"><Terminal size={18} /><strong>{incident.root_cause.service}</strong><span>{incident.root_cause.confidence} confidence</span></div><p>{display.humanize(incident.root_cause.summary)}</p><div className="impact"><span>FINANCIAL IMPACT</span><strong>{money(incident.impact_minor)}</strong><small>{incident.affected_payments.length} affected payment{incident.affected_payments.length === 1 ? '' : 's'} · {incident.affected_accounts.map(display.accountName).join(', ')}</small></div></div>

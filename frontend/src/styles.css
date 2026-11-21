@@ -66,3 +66,10 @@ main>section+section{padding-top:0;margin-top:55px}
 .runner-badge{display:inline-block;margin-top:12px;padding:7px 10px;border:1px solid #315660;border-radius:5px;background:#112831;color:#a5e0e6;font-size:11px;line-height:1.6;overflow-wrap:anywhere}
 @media(max-width:1250px){.workflow-strip{left:205px;padding-left:22px;padding-right:22px}.workflow-steps{gap:7px}.workflow-steps strong{font-size:9px}}
 @media(max-width:850px){.workflow-strip{left:65px;padding:10px 16px}.workflow-steps{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:10px}.workflow-next{align-items:flex-start}.workflow-next p{font-size:10px}.workflow-next .button{font-size:10px;padding:8px}.incident-summary{font-size:15px;padding:16px}}
+
+html{zoom:1.2}
+.top-integrity .badge{font-size:15px;padding:7px 14px;letter-spacing:.06em}
+.incident-header .badge{font-size:12px;padding:5px 10px}
+.balance-banner{border:1px solid var(--line);background:#10161f;color:#9fb0c5;border-radius:7px;padding:13px 18px;font-size:13px;margin-bottom:18px}.balance-banner.alert{border-color:#8a3a48;background:#301c25;color:var(--red)}
+.step.terminal{color:var(--red);border-top-color:var(--red)}.stepper:has(.terminal){grid-template-columns:repeat(8,1fr)}
+.error-result:has(.forbidden){background:#3a1820;border:1px solid var(--red);border-radius:6px;padding:9px 14px;margin-top:12px;align-items:center;width:fit-content}.error-result:has(.forbidden) svg{width:16px;height:16px}.forbidden{font-size:13px;font-weight:600;color:var(--red)}
