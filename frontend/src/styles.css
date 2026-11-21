@@ -95,6 +95,7 @@ nav button:hover { color: #fafafa; background: #232326; }
 .top-integrity .badge svg { width: 16px; height: 16px; }
 .workflow-strip { position: fixed; top: var(--topbar-height); left: var(--rail-width); right: 0; z-index: 20; padding: 15px 28px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .workflow-steps { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; list-style: none; margin: 0; padding: 0; }
+.workflow-steps.terminal-workflow { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .workflow-steps li { display: flex; align-items: flex-start; gap: 7px; color: var(--faint); min-width: 0; }
 .workflow-steps li>span { border: 1px solid #45454d; border-radius: 50%; width: 20px; height: 20px; flex-shrink: 0; display: grid; place-items: center; font-size: 0.8rem; }
 .workflow-steps strong { display: block; font-size: 0.8rem; font-weight: 500; line-height: 1.5; }
@@ -369,7 +370,7 @@ footer>span:first-child { display: flex; align-items: center; gap: 7px; }
   .top-indicators { font-size: 0.733rem; }
   main { padding-left: 16px; padding-right: 16px; }
   .workflow-strip { padding: 12px 16px; }
-  .workflow-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; }
+  .workflow-steps, .workflow-steps.terminal-workflow { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; }
   .workflow-steps small { font-size: 0.733rem; }
   .workflow-next { align-items: flex-start; }
   .workflow-next p { font-size: 0.8rem; }

@@ -84,6 +84,7 @@ export default function App() {
   const display = createDisplay(overview?.accounts ?? [], payments, ledger)
   const incident = incidents[0]
   const workflow = deriveWorkflow(overview, incident)
+  const guideIndex = workflow.terminal ? -1 : workflow.index
   const workflowRef = useRef<HTMLDivElement>(null)
   const lastStage = useRef(-1)
   useEffect(() => { setChallenge(null) }, [incident?.id])
@@ -196,8 +197,10 @@ export default function App() {
     </header>
 
     <div className="workflow-strip" ref={workflowRef} role="region" aria-label="Guided workflow">
-      <ol className="workflow-steps">{workflowSteps.map((step, index) => <li key={step.title} className={`${index === workflow.index ? 'current' : index < workflow.index ? 'complete' : ''} tone-${guideStepTone(index, workflow.index, incident?.status ?? status)}`} aria-current={index === workflow.index ? 'step' : undefined}><span>{index < workflow.index ? <Check size={12} /> : index + 1}</span><div><strong>{step.title}</strong><small>{step.caption}</small></div></li>)}</ol>
-      <div className="workflow-next"><p data-testid="workflow-caption">{workflow.caption}</p><button className="button primary" data-testid="workflow-next" aria-label={'Go to control: ' + workflow.action} disabled={!overview || !connected} onClick={guideNext}>{workflow.action}<ArrowRight size={15} /></button></div>
+      <ol className={`workflow-steps ${workflow.terminal ? 'terminal-workflow' : ''}`}>{workflowSteps.map((step, index) => <li key={step.title} className={`${index === guideIndex ? 'current' : index < guideIndex ? 'complete' : ''} tone-${guideStepTone(index, guideIndex, incident?.status ?? status)}`} aria-current={index === guideIndex ? 'step' : undefined}><span>{index < guideIndex ? <Check size={12} /> : index + 1}</span><div><strong>{step.title}</strong><small>{step.caption}</small></div></li>)}
+        {workflow.terminal && <li className="current tone-danger" aria-current="step" data-testid="guide-terminal-step"><span><X size={14} /></span><div><strong>{workflow.terminal === 'rejected' ? 'Rejected' : 'Failed'}</strong><small>Recovery not applied</small></div></li>}
+      </ol>
+      <div className="workflow-next"><p data-testid="workflow-caption">{workflow.caption}</p><button className="button primary" data-testid="workflow-next" aria-label={workflow.terminal ? workflow.caption : 'Go to control: ' + workflow.action} disabled={!overview || !connected || (!!workflow.terminal && !!pending)} onClick={workflow.terminal ? () => { void act('reset', '/reset') } : guideNext}>{workflow.action}{workflow.terminal ? <RotateCcw size={15} /> : <ArrowRight size={15} />}</button></div>
     </div>
     <main>
       {(error || !connected) && <div className="connection-banner" role="status"><Radio size={16} />{error ? display.humanize(error) : 'Event stream reconnecting; displayed data may be stale.'}<button onClick={() => { void refresh() }}>Retry connection</button></div>}

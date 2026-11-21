@@ -43,7 +43,7 @@ for (const [name, bank, incident, index, action] of [
   ['correcting', overview, { status: 'correcting' }, 4, 'View correction progress'],
   ['verified', { ...overview, services: [{ status: 'quarantined' }] }, { status: 'resolved', verification: { checks: seven } }, 5, 'Release settlement-svc'],
   ['released', overview, { status: 'resolved', verification: { checks: seven } }, 5, 'Reset baseline'],
-  ['rejected', { ...overview, integrity: { status: 'violated' } }, { status: 'rejected' }, 2, 'Reset baseline'],
+  ['rejected', { ...overview, integrity: { status: 'violated' } }, { status: 'rejected' }, 6, 'Reset baseline'],
   ['evidence pending', { ...overview, integrity: { status: 'violated' } }, undefined, 2, 'Review the evidence'],
 ]) {
   test('workflow derives ' + name + ' from backend state', () => {
@@ -54,4 +54,23 @@ for (const [name, bank, incident, index, action] of [
 }
 test('failed sandbox cannot enable the approval workflow stage', () => {
   assert.equal(deriveWorkflow(overview, { status: 'awaiting_approval', sandbox: { passed: false } }).index, 2)
+})
+for (const status of ['rejected', 'failed']) {
+  test(`terminal ${status} guide has a reset target regardless of integrity status`, () => {
+    for (const integrityStatus of ['healthy', 'violated', 'recovering']) {
+      const result = deriveWorkflow({ ...overview, integrity: { status: integrityStatus } }, { status })
+      assert.equal(result.index, 6)
+      assert.equal(result.terminal, status)
+      assert.equal(result.caption, 'Reset the bank to start again')
+      assert.equal(result.action, 'Reset baseline')
+      assert.equal(result.section, 'simulator')
+      assert.equal(result.target, '[data-action="reset"]')
+    }
+  })
+}
+test('terminal guide clears with reset and waits for real overview data', () => {
+  assert.equal(deriveWorkflow(overview).terminal, undefined)
+  assert.equal(deriveWorkflow(overview, { status: 'awaiting_approval', sandbox: { passed: true } }).terminal, undefined)
+  assert.equal(deriveWorkflow(null, { status: 'failed' }).index, -1)
+  assert.equal(deriveWorkflow(null, { status: 'failed' }).terminal, undefined)
 })
