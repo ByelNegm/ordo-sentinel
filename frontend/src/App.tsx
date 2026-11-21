@@ -6,13 +6,14 @@ import { PulseIcon as Activity, ArrowDownLeftIcon as ArrowDownLeft, ArrowRightIc
   FlaskIcon as FlaskConical, StackIcon as Layers3, SpinnerGapIcon as LoaderCircle,
   LockKeyIcon as LockKeyhole, BroadcastIcon as Radio, ArrowCounterClockwiseIcon as RotateCcw,
   CubeFocusIcon as ScanLine, CheckCircleIcon as ShieldCheck, WarningCircleIcon as ShieldX,
-  TerminalWindowIcon as Terminal, WarningIcon as TriangleAlert, LightningIcon as Zap, XIcon as X } from '@phosphor-icons/react'
+  TerminalWindowIcon as Terminal, WarningIcon as TriangleAlert, LightningIcon as Zap, XIcon as X, ClockIcon as Clock } from '@phosphor-icons/react'
 import type { ChallengeVariant, Check as IntegrityCheck, Entry, SandboxChallenge } from './types'
 import { api, useBank } from './useBank'
 import { createDisplay } from './display'
 import { deriveWorkflow, workflowSteps } from './workflow'
 import { sandboxRunnerLabel } from './sandboxRunner'
 import { balanceMessage, isForbiddenApproval, terminalStage } from './presentation'
+import { auditTone, guideStepTone, statusTone } from './status'
 
 const DisplayContext = createContext(createDisplay([], [], []))
 
@@ -27,12 +28,11 @@ const navigation = [
   { id: 'verification', title: 'Recovery Verification', icon: ShieldCheck },
 ]
 const stages = ['detected', 'investigating', 'contained', 'validating', 'awaiting_approval', 'correcting', 'resolved']
-const positive = new Set(['healthy', 'running', 'settled', 'resolved', 'passed'])
-const negative = new Set(['violated', 'quarantined', 'discrepancy', 'missing', 'failed', 'rejected'])
 
 function Badge({ value, children }: { value: string; children?: ReactNode }) {
-  return <span className={`badge ${positive.has(value) ? 'good' : negative.has(value) ? 'bad' : 'warn'}`}>
-    {positive.has(value) ? <Check size={12} /> : negative.has(value) ? <ShieldX size={12} /> : <span className="dot" />}{children ?? label(value)}</span>
+  const tone = statusTone(value)
+  return <span className={`badge tone-${tone}`}>
+    {tone === 'success' ? <Check size={12} /> : tone === 'danger' ? <ShieldX size={12} /> : tone === 'warning' ? <Clock size={12} /> : <span className="dot" />}{children ?? label(value)}</span>
 }
 function Panel({ title, note, children, className = '' }: { title: string; note?: ReactNode; children: ReactNode; className?: string }) {
   return <div className={`panel ${className}`}><div className="panel-heading"><h3>{title}</h3>{note}</div>{children}</div>
@@ -49,7 +49,7 @@ function SectionTitle({ number, title, subtitle }: { number: string; title: stri
 function Checks({ checks, compact = false }: { checks: IntegrityCheck[]; compact?: boolean }) {
   const display = useContext(DisplayContext)
   return <div className={compact ? 'check-list' : 'checks-grid'}>{checks.map(check =>
-    <div className={`integrity-check ${check.pass ? 'pass' : 'fail'}`} key={check.name} title={display.humanize(check.detail)}>
+    <div className={`integrity-check ${check.pass ? 'pass' : 'fail'} tone-${statusTone(check.pass ? 'passed' : 'failed')}`} key={check.name} title={display.humanize(check.detail)}>
       {check.pass ? <ShieldCheck size={17} /> : <ShieldX size={17} />}
       <div><strong>{label(check.name)}</strong><small>{compact ? display.humanize(check.detail) : check.pass ? 'PASS' : 'FAIL'}</small></div>
       {compact && <span className="check-result">{check.pass ? 'PASS' : 'FAIL'}</span>}
@@ -164,7 +164,7 @@ export default function App() {
       setPending('')
     }
   }
-  const result = (key: string) => results[key] && <div className={`action-result ${results[key].error ? 'error-result' : ''} ${isForbiddenApproval(key, results[key]) ? 'approval-forbidden' : ''}`} role={results[key].error ? 'alert' : 'status'}>
+  const result = (key: string) => results[key] && <div className={`action-result tone-${results[key].error ? 'danger' : key === 'challenge' ? challenge ? statusTone(challenge.response.sandbox.passed ? 'passed' : 'rejected') : 'warning' : ['duplicate', 'missing', 'tamper'].includes(key) ? 'warning' : ['approve', 'release', 'reset'].includes(key) ? 'success' : 'neutral'} ${results[key].error ? 'error-result' : ''} ${isForbiddenApproval(key, results[key]) ? 'approval-forbidden tone-danger' : ''}`} role={results[key].error ? 'alert' : 'status'}>
     {results[key].error ? <TriangleAlert size={14} /> : <Check size={14} />}{isForbiddenApproval(key, results[key]) ? <div className="forbidden-copy">
       <strong>Agent approval blocked</strong><p>{display.humanize(results[key].text)}</p>
       {overview && <BalanceBanner balanced={balanced === true} status={status} context />}
@@ -190,13 +190,13 @@ export default function App() {
     <header className="topbar">
       <span className="top-path">Workspace <ChevronRight size={13} /><b>Bank infrastructure</b></span>
       <div className="top-indicators"><span className="top-integrity" data-testid="integrity-status">{status ? <Badge value={status}>{status.toUpperCase()}</Badge> : 'CONNECTING'}</span>
-        <span data-testid="checks-passed">{passed ?? '–'}/7 checks</span><span className="top-service">{service?.id ?? 'settlement-svc'} <b className={service?.status === 'quarantined' ? 'red-text' : 'accent-text'}>{service?.status ?? '–'}</b></span>
+        <span data-testid="checks-passed">{passed ?? '–'}/7 checks</span><span className="top-service">{service?.id ?? 'settlement-svc'} <b className={`status-chip tone-${statusTone(service?.status)}`}>{service?.status ?? '–'}</b></span>
         <span>{overview?.open_incidents ?? '–'} open</span><span className="traffic-state"><Radio size={13} /> Traffic {overview ? overview.traffic_running ? 'ON' : 'OFF' : '–'}</span>
       </div>
     </header>
 
     <div className="workflow-strip" ref={workflowRef} role="region" aria-label="Guided workflow">
-      <ol className="workflow-steps">{workflowSteps.map((step, index) => <li key={step.title} className={index === workflow.index ? 'current' : index < workflow.index ? 'complete' : ''} aria-current={index === workflow.index ? 'step' : undefined}><span>{index < workflow.index ? <Check size={12} /> : index + 1}</span><div><strong>{step.title}</strong><small>{step.caption}</small></div></li>)}</ol>
+      <ol className="workflow-steps">{workflowSteps.map((step, index) => <li key={step.title} className={`${index === workflow.index ? 'current' : index < workflow.index ? 'complete' : ''} tone-${guideStepTone(index, workflow.index, incident?.status ?? status)}`} aria-current={index === workflow.index ? 'step' : undefined}><span>{index < workflow.index ? <Check size={12} /> : index + 1}</span><div><strong>{step.title}</strong><small>{step.caption}</small></div></li>)}</ol>
       <div className="workflow-next"><p data-testid="workflow-caption">{workflow.caption}</p><button className="button primary" data-testid="workflow-next" aria-label={'Go to control: ' + workflow.action} disabled={!overview || !connected} onClick={guideNext}>{workflow.action}<ArrowRight size={15} /></button></div>
     </div>
     <main>
@@ -207,7 +207,7 @@ export default function App() {
           <h1>{!overview ? 'Connecting to the bank.' : status === 'violated' ? 'Balanced. But not correct.' : status === 'recovering' ? 'Recovery in progress.' : incident?.status === 'resolved' ? 'Integrity restored.' : 'Trust, independently verified.'}</h1>
           <p>Reconcile what happened against what should have happened.</p></div><div className="environment"><span className="dot live-dot" /> Synthetic bank<small>Real ledger. Real fault paths.</small></div></div>
         <div className="metric-grid" id="live-bank-metrics">
-          <div className="metric"><span><Activity size={16} /> Payment volume</span><strong>{overview?.volume.instructions.toLocaleString() ?? '–'}<small>instructions</small></strong><div>{overview?.volume.settled ?? '–'} settled <i />{overview?.volume.held ?? '–'} held <i />{overview?.volume.pending ?? '–'} pending</div></div>
+          <div className="metric"><span><Activity size={16} /> Payment volume</span><strong>{overview?.volume.instructions.toLocaleString() ?? '–'}<small>instructions</small></strong><div><span className="status-chip tone-success">{overview?.volume.settled ?? '–'} settled</span><span className={`status-chip tone-${overview?.volume.held ? 'warning' : 'neutral'}`}>{overview?.volume.held ?? '–'} held</span><span className={`status-chip tone-${overview?.volume.pending ? 'warning' : 'neutral'}`}>{overview?.volume.pending ?? '–'} pending</span></div></div>
           <div className="metric"><span><ArrowUpRight size={16} /> Total debits</span><strong className="money">{overview ? money(overview.totals.debits_minor) : '–'}</strong><div>{overview?.totals.ledger_entries ?? '–'} append-only journal entries</div></div>
           <div className="metric"><span><ArrowDownLeft size={16} /> Total credits</span><strong className="money">{overview ? money(overview.totals.credits_minor) : '–'}</strong><div className={balanced === null ? '' : balanced ? 'accent-text' : 'red-text'}>{balanced === null ? 'Waiting for ledger' : balanced ? <><Check size={11} /> Debits equal credits</> : 'Debits and credits differ'}<b className="balanced-note">Balanced ≠ correct</b></div></div>
         </div>
@@ -255,7 +255,7 @@ export default function App() {
         {!incident ? <Panel title="Investigation workspace"><Empty>No incidents. Monitoring independent payment intent for integrity violations.</Empty></Panel> : <>
           <p className="incident-summary" data-testid="incident-summary">{incident.summary_text ?? 'Reconstructing the payment from independent evidence…'}</p>
           <div className="incident-header"><span className="accent-text">Settlement recovery</span><span>{label(incident.type)}</span><Badge value={incident.status}><span data-testid="incident-status">{label(incident.status)}</span></Badge><span className="subtle">Newest incident · {incidents.length} total</span></div>
-          <div className="stepper">{stages.map((stage, index) => <div key={stage} className={incident.status === stage ? 'step current' : stages.indexOf(incident.status) > index ? 'step done' : 'step'}><span>{stages.indexOf(incident.status) > index ? <Check size={13} /> : String(index + 1).padStart(2, '0')}</span><b>{label(stage)}</b></div>)}{terminalStage(incident.status) && <div className="step terminal" data-testid="terminal-step"><span><X size={14} /></span><b>{terminalStage(incident.status)}</b></div>}</div>
+          <div className="stepper">{stages.map((stage, index) => <div key={stage} className={`${incident.status === stage ? 'step current' : stages.indexOf(incident.status) > index ? 'step done' : 'step'} tone-${incident.status === stage ? statusTone(stage) : stages.indexOf(incident.status) > index ? 'success' : 'neutral'}`}><span>{stages.indexOf(incident.status) > index ? <Check size={13} /> : String(index + 1).padStart(2, '0')}</span><b>{label(stage)}</b></div>)}{terminalStage(incident.status) && <div className="step terminal tone-danger" data-testid="terminal-step"><span><X size={14} /></span><b>{terminalStage(incident.status)}</b></div>}</div>
           <div className="investigation-grid">
             <Panel title="Root cause" note={<span className="method">{incident.root_cause.method === 'deterministic' ? 'Deterministic' : incident.root_cause.method}</span>}>
               <div className="root-cause"><div className="root-service"><Terminal size={18} /><strong>{incident.root_cause.service}</strong><span>{incident.root_cause.confidence} confidence</span></div><p>{display.humanize(incident.root_cause.summary)}</p><div className="impact"><span>Financial impact</span><strong>{money(incident.impact_minor)}</strong><small>{incident.affected_payments.length} affected payment{incident.affected_payments.length === 1 ? '' : 's'} · {incident.affected_accounts.map(display.accountName).join(', ')}</small></div></div>
@@ -265,7 +265,7 @@ export default function App() {
           <Panel title="Evidence lineage" note={<span className="subtle">Independent intent → event → journal</span>}>
             <div className="lineages">{incident.lineage.length ? incident.lineage.map(line => <div className="lineage" key={line.instruction_id}><div><small>Payment instruction</small><strong className="mono">{display.reference(line.instruction_id)}</strong><small>{display.purpose(line.instruction_id)}</small><small className="evidence-id">{line.instruction_id}</small></div><ArrowRight size={18} /><div><small>Settlement events</small>{line.event_ids.length ? line.event_ids.map(id => <code className="evidence-id" key={id}>{id}</code>) : <em>No event recorded</em>}</div><ArrowRight size={18} /><div><small>Ledger entries</small>{line.entry_ids.length ? line.entry_ids.map(id => <code className="evidence-id" key={id}>{id}</code>) : <em>No posting recorded</em>}</div></div>) : <Empty>Reconstructing lineage from independent evidence…</Empty>}</div>
           </Panel>
-          <Panel title="Evidence timeline" note={<span className="subtle">{incident.timeline.length} recorded events</span>}><div className="timeline">{incident.timeline.map((item, index) => <div className="timeline-item" key={index}><span className="timeline-node" /><time>{clock(item.ts)}</time><span className="timeline-kind">{label(item.kind)}</span><p>{display.humanize(item.detail)}<small className="mono evidence-id">{item.ref}</small></p></div>)}</div></Panel>
+          <Panel title="Evidence timeline" note={<span className="subtle">{incident.timeline.length} recorded events</span>}><div className="timeline">{incident.timeline.map((item, index) => <div className="timeline-item" key={index}><span className="timeline-node" /><time>{clock(item.ts)}</time><span className={`timeline-kind status-chip tone-${auditTone(item.kind)}`}>{label(item.kind)}</span><p>{display.humanize(item.detail)}<small className="mono evidence-id">{item.ref}</small></p></div>)}</div></Panel>
         </>}
       </section>
 
@@ -273,7 +273,7 @@ export default function App() {
         <SectionTitle number="04" title="Recovery Sandbox" subtitle="Prove the correction in isolation. A human decides whether it reaches the ledger." />
         {!incident?.proposal ? <Panel title="Isolated recovery environment"><Empty>No proposal yet. Recovery proposals appear here after investigation and containment.</Empty></Panel> : <>
           <div className="challenge-comparison">
-            {incident.sandbox ? <div className={`sandbox-banner ${incident.sandbox.passed ? 'passed' : 'failed'}`}>{incident.sandbox.passed ? <ShieldCheck size={27} /> : <ShieldX size={27} />}<div><strong data-testid="sandbox-result">SANDBOX {incident.sandbox.passed ? 'PASSED' : 'FAILED'}</strong><p>{incident.sandbox.passed ? 'All seven checks pass on an isolated copy. The real ledger is untouched.' : 'Validation failed. Do not apply this proposal.'}</p>{incident.sandbox.passed && <span className="runner-badge" data-testid="sandbox-runner">{sandboxRunnerLabel(incident.sandbox)}</span>}</div><span className="method">Isolated copy</span></div> : <div className="sandbox-banner"><LoaderCircle className="spin" /><strong>Sandbox validation in progress</strong></div>}
+            {incident.sandbox ? <div className={`sandbox-banner ${incident.sandbox.passed ? 'passed' : 'failed'} tone-${statusTone(incident.sandbox.passed ? 'passed' : 'failed')}`}>{incident.sandbox.passed ? <ShieldCheck size={27} /> : <ShieldX size={27} />}<div><strong data-testid="sandbox-result">SANDBOX {incident.sandbox.passed ? 'PASSED' : 'FAILED'}</strong><p>{incident.sandbox.passed ? 'All seven checks pass on an isolated copy. The real ledger is untouched.' : 'Validation failed. Do not apply this proposal.'}</p>{incident.sandbox.passed && <span className="runner-badge" data-testid="sandbox-runner">{sandboxRunnerLabel(incident.sandbox)}</span>}</div><span className="method">Isolated copy</span></div> : <div className="sandbox-banner tone-warning"><LoaderCircle className="spin" /><strong>Sandbox validation in progress</strong></div>}
             <div className="panel challenge-controls">
               <h3>Attempt unsafe correction</h3><p>Test a deliberately wrong candidate. Never apply it to the real ledger.</p>
               <div className="challenge-buttons">
@@ -282,7 +282,7 @@ export default function App() {
                     {pending === 'challenge' ? <LoaderCircle className="spin" size={15} /> : <ShieldX size={15} />}{title}
                   </button>)}
               </div>
-              {challenge && <div className={`challenge-result ${challenge.response.sandbox.passed ? 'passed' : 'failed'}`}>
+              {challenge && <div className={`challenge-result ${challenge.response.sandbox.passed ? 'passed' : 'failed'} tone-${statusTone(challenge.response.sandbox.passed ? 'passed' : 'rejected')}`}>
                 <strong data-testid="challenge-result">SANDBOX {challenge.response.sandbox.passed ? 'PASSED' : 'REJECTED'}</strong>
                 <p>Variant: {label(challenge.response.variant)}</p>
                 <ul className="rejection-reasons">{challenge.response.rejection_reasons.map((reason, index) => <li key={index}><strong>{label(reason.rule)}</strong><span>{display.humanize(reason.detail)}</span></li>)}</ul>
@@ -311,12 +311,12 @@ export default function App() {
       <section id="verification">
         <SectionTitle number="05" title="Recovery Verification" subtitle="Verify the real ledger. Preserve the original. Restore the service." />
         {incident?.verification ? <>
-          <div className={`verification-hero ${incident.status === 'resolved' ? 'verified' : 'failed'}`}><span className="verification-icon">{incident.status === 'resolved' ? <ShieldCheck size={38} /> : <ShieldX size={38} />}</span><div><div className="overline">Real ledger verification</div><h2>{incident.status === 'resolved' ? 'INTEGRITY RESTORED' : 'VERIFICATION FAILED'}</h2><p>{incident.verification.checks.filter(check => check.pass).length}/7 checks passing · {incident.corrections.length} append-only correction{incident.corrections.length === 1 ? '' : 's'} · original history preserved</p></div><Badge value={incident.status} /></div>
+          <div className={`verification-hero ${incident.status === 'resolved' ? 'verified' : 'failed'} tone-${statusTone(incident.status)}`}><span className="verification-icon">{incident.status === 'resolved' ? <ShieldCheck size={38} /> : <ShieldX size={38} />}</span><div><div className="overline">Real ledger verification</div><h2>{incident.status === 'resolved' ? 'INTEGRITY RESTORED' : 'VERIFICATION FAILED'}</h2><p>{incident.verification.checks.filter(check => check.pass).length}/7 checks passing · {incident.corrections.length} append-only correction{incident.corrections.length === 1 ? '' : 's'} · original history preserved</p></div><Badge value={incident.status} /></div>
           <Panel title="Verified integrity checks"><Checks checks={incident.verification.checks} /></Panel>
           <Panel title="Applied corrections" note={<span className="subtle">Original history preserved</span>}><EntryTable entries={corrections} originals /><div className="preserved">{corrections.map(entry => <p key={entry.id}><Check size={14} />{entry.corrects_entry_id ? <>Original preserved: <button className="text-link mono" onClick={() => { setLedgerOpen(true); setActive('bank'); requestAnimationFrame(() => document.getElementById('ledger-' + entry.corrects_entry_id)?.scrollIntoView({ block: 'start' })) }}>{display.journal(entry.corrects_entry_id)}</button></> : <>Missing/correct intent effect appended for <code>{display.reference(entry.instruction_id)}</code></>}</p>)}{incident.approval && <p><LockKeyhole size={14} />Approved by {incident.approval.actor} at {clock(incident.approval.at)}</p>}</div></Panel>
         </> : <Panel title="Post-recovery verification"><Empty>No corrections applied. Verification results appear after an authorized recovery.</Empty></Panel>}
-        <div className="release-strip"><div><Radio size={20} /><span><strong>Release settlement-svc</strong><small>{overview?.volume.held ?? '–'} held instructions · service {service?.status ?? 'unavailable'}. Requires no open incidents.</small></span></div>{actionButton('release', 'Release settlement-svc', '/services/settlement-svc/release', 'primary', service?.status !== 'quarantined' || (overview?.open_incidents ?? 1) > 0)}{result('release')}</div>
-        <Panel title="Audit trail" note={<span className="subtle">Latest {audit.length} records · All actions accountable</span>}><div className="table-scroll audit-scroll"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Reference / detail</th></tr></thead><tbody>{audit.map(record => <tr key={record.id}><td className="mono">{clock(record.ts)}</td><td>{record.actor}</td><td><span className="audit-action">{label(record.action)}</span></td><td><span>{display.humanize(record.ref ?? '–')}</span><small>{display.humanize(record.detail)}</small></td></tr>)}</tbody></table>{!audit.length && <Empty>No audit records received.</Empty>}</div></Panel>
+        <div className="release-strip"><div><Radio size={20} /><span><strong>Release settlement-svc</strong><small>{overview?.volume.held ?? '–'} held instructions · service <span className={`status-chip tone-${statusTone(service?.status)}`}>{service?.status ?? 'unavailable'}</span>. Requires no open incidents.</small></span></div>{actionButton('release', 'Release settlement-svc', '/services/settlement-svc/release', 'primary', service?.status !== 'quarantined' || (overview?.open_incidents ?? 1) > 0)}{result('release')}</div>
+        <Panel title="Audit trail" note={<span className="subtle">Latest {audit.length} records · All actions accountable</span>}><div className="table-scroll audit-scroll"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Reference / detail</th></tr></thead><tbody>{audit.map(record => <tr key={record.id}><td className="mono">{clock(record.ts)}</td><td>{record.actor}</td><td><span className={`audit-action status-chip tone-${auditTone(record.action, record.detail)}`}>{label(record.action)}</span></td><td><span>{display.humanize(record.ref ?? '–')}</span><small>{display.humanize(record.detail)}</small></td></tr>)}</tbody></table>{!audit.length && <Empty>No audit records received.</Empty>}</div></Panel>
       </section>
       <footer><span><Circle size={7} fill="currentColor" /> BLACKBOX / Independent by design</span><span>Synthetic data only · In-memory demo · No real payments</span></footer>
     </main>
