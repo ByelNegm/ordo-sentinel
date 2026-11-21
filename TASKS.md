@@ -11,7 +11,8 @@ All target times: **2026-11-21, Asia/Dubai**. Check only when complete; append e
 - [x] [ByelNegm + Devin] Decision/unfreeze/reset endpoints; idempotency and runner cancellation — **13:30**.
 - [x] [ByelNegm + Devin] Async cached LLM explainer + immediate EN/AR template fallback — **13:30**.
 - [ ] [ByelNegm + Devin] CORS/proxy check with frontend; Vite /api → :8000 — **13:45**.
-- [ ] [ByelNegm + Devin] pytest drain scenario, policy boundaries, duplicate deny, reset and LLM failure; measure freeze latency — **14:30**.
+- [x] [ByelNegm + Devin] pytest drain scenario, policy boundaries, duplicate deny, reset and LLM failure; measure requested SSE timestamp delta (0.0 ms, simulated timestamps, not wall-clock latency) — **14:30**.
+- [x] [ByelNegm + Devin] Backend REST/SSE integration: normal → drain → wire Deny → protected counter → reset, twice via live curl — **13:45**.
 
 ## Frontend — colleague + her Devin
 - [ ] [Frontend colleague + Devin] React/Vite/Tailwind skeleton, /phone and /analyst routes — **12:15**.

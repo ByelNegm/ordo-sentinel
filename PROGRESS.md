@@ -1,7 +1,7 @@
 # Progress — Ordo Sentinel
-**Current phase:** Phase 0 backend skeleton; frozen models and builder interfaces ready for parallel implementation.
+**Current phase:** Backend integrated; live normal/drain/deny/reset flow verified twice.
 
-**Next milestone:** 12:15 contract/fixtures freeze + UI skeleton.  
+**Next milestone:** 13:45 live frontend/backend integration.
 **Blockers:** colleague collaborator invite pending.  
 **Clock:** 2026-11-21, Asia/Dubai (UTC+04:00); submit 15:30, deadline 16:00.
 
@@ -9,6 +9,7 @@
 Every session/person appends a dated, timed entry when finishing a task or changing a decision, in its PR. Keep newest first (insert at top of log), name the owner, outcome/evidence and any decision or blocker; tick the matching [TASKS.md](TASKS.md) item and refresh this status header. Read [GOAL.md](GOAL.md) before taking new work. Fixture timestamps use a fixed demo clock, not this work log's date.
 
 ## Log — 2026-11-21 (Asia/Dubai)
+- **12:15 — Devin:** Backend integrated on api/skeleton (risk/policy + explainer + bank/scenario); pytest: 113 passed, one existing Starlette TestClient deprecation warning. Live curl/SSE normal → drain → wire Deny → reset passed twice: protected_amount 450000 with api_partner_7 frozen; reset restored AED 520000, no holds/freezes/protection or live records. Requested wire txn.scored → first alert.created timestamp delta: 0.0 ms in both runs. Both events carry the same simulated transaction timestamp, so this is NOT a measured wall-clock freeze latency. Evidence: /home/ubuntu/ordo-sentinel-evidence/stream.sse and results.json. Uvicorn remains on :8000; UI/proxy integration and visual verification still pending.
 - **12:12 — Devin (Builder B):** Seeded Aisha's 90-day baseline and replaced backend replay with generated normal/drain runs. Added simulated-clock alert expiry, actionable follow-up holds after an early decision, and reset that joins scenario and enrichment tasks. Integrated backend pytest: 113 passed. Wire explanation uses 86.55% of the live AED 519,915 balance. Thirty in-process demo cycles each reached AED 450,000 protected on wire Deny, with a maximum of 0.113 ms from wire submission to bank block and client freeze.
 - **12:01 — Devin (Builder C):** api/explainer: deterministic EN/AR customer messages + analyst narratives built from txn risk factors (reason codes, amounts, client/device, % of balance); sync template-only explain (no network); separate async enrich() LLM rewrite only when an OpenAI/Anthropic key is set (ORDO_LLM_MODEL, 1s total cap), cached, None on any error. LLM never decides. pytest: 23 passed (1 Starlette deprecation warning). No key configured, so demo uses templates.
 - **11:57 — Devin:** Phase 0: added typed FastAPI models, live fixture-backed bank/scenarios, REST actions and SSE, plus contract tests and module ownership handoff on api/skeleton. pytest: 11 passed (one Starlette TestClient dependency deprecation warning); live uvicorn/curl observed drain freeze, Deny → protected_amount 450000 and reset. SSE curl timeout is expected; pytest separately observed the 15s heartbeat. Only skeleton/SSE checklist items marked complete; fixture risk, template-only explanations, statistical baseline/expiry and live frontend integration remain builder work.
