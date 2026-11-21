@@ -2,9 +2,9 @@
 All target times: **2026-11-21, Asia/Dubai**. Check only when complete; append evidence/decisions to [PROGRESS.md](PROGRESS.md). Follow [GOAL.md](GOAL.md); new scope must pass its drift check. Backend branches api/*; frontend ui/*; PRs into main.
 
 ## Backend — ByelNegm + Devin
-- [ ] [ByelNegm + Devin] FastAPI skeleton, /api/state and fixtures served for development — **12:15**.
+- [x] [ByelNegm + Devin] FastAPI skeleton, /api/state and fixtures served for development — **12:15**.
 - [ ] [ByelNegm + Devin] Mock bank + deterministic one-customer seed/baseline — **12:30**.
-- [ ] [ByelNegm + Devin] SSE stream, 15s heartbeat, X-Accel-Buffering: no — **12:45**.
+- [x] [ByelNegm + Devin] SSE stream, 15s heartbeat, X-Accel-Buffering: no — **12:45**.
 - [ ] [ByelNegm + Devin] asyncio normal/drain scenario runner — **13:00**.
 - [ ] [ByelNegm + Devin] Risk engine, customer stats and reason codes — **13:00**.
 - [ ] [ByelNegm + Devin] Policy: <40 allow, 40–75 hold, >75 or cumulative drain >30% freeze client — **13:15**.
