@@ -39,6 +39,11 @@ export type Incident = {
   corrections: string[]; verification: Integrity | null
 }
 export type Audit = { id: string; ts: string; actor: string; action: string; ref: string | null; detail: string }
+export type ChallengeVariant = 'wrong_amount' | 'reverse_original'
+export type SandboxChallenge = {
+  variant: ChallengeVariant; proposal: NonNullable<Incident['proposal']>
+  sandbox: NonNullable<Incident['sandbox']>; ledger_unchanged: boolean
+}
 export type Snapshot = {
   overview: Overview | null; integrity: Integrity | null; payments: Payment[]
   settlements: Settlement[]; ledger: Entry[]; incidents: Incident[]; audit: Audit[]

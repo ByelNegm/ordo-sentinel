@@ -4,7 +4,7 @@ Live-only React + TypeScript + Vite + Tailwind console. No mock mode or prerecor
 
 ## Run
 
-Node 20.19+ or 22.12+; backend running on port 8000:
+Node 22.12+ (verified with 24.22.2); backend running on port 8000:
 
 ```sh
 npm ci
@@ -15,6 +15,7 @@ Open http://localhost:5173. Vite proxies /api to the backend on 127.0.0.1:8000.
 
 ```sh
 npm run build
+npm run test:api
 npm run test:acceptance
 ```
 
@@ -27,6 +28,7 @@ Acceptance uses Playwright attached to Chrome CDP at http://localhost:29229. Ove
 - Payments, events, ledger, account balances, all seven checks, and all three real fault controls.
 - Newest incident, deterministic root cause, containment, lineage and evidence timeline.
 - Isolated proposal, balance simulation, before/after checks, agent 403 demonstration and human approval/rejection.
+- Two real unsafe-correction challenges beside the safe proposal: rejected checks and ledger-preservation proof, followed by normal human approval. Acceptance also captures sandbox_rejected.png.
 - Actual corrections with original-entry links, final verification, service release and audit.
 
 Money is formatted from integer minor units. Action responses and backend errors are shown inline; response details can be expanded. All money movement and lifecycle decisions remain on the backend. Read limits use the backend's maximum of 500.

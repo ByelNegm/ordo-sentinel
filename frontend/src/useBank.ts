@@ -2,14 +2,29 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Snapshot } from './types'
 
 export async function api(path: string, body?: unknown, method = 'GET') {
-  const response = await fetch('/api' + path, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const data = await response.json()
-  if (!response.ok) throw new Error(`HTTP ${response.status} · ${typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)}`)
-  return data
+  let response: Response
+  try {
+    response = await fetch('/api' + path, {
+      method,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    throw new Error('Backend unreachable')
+  }
+  if (!response.ok) {
+    let detail = ''
+    try {
+      const data = JSON.parse(await response.text())
+      if (data?.detail != null) detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+    } catch {}
+    throw new Error(`HTTP ${response.status}${detail ? ' · ' + detail : ''}`)
+  }
+  try {
+    return JSON.parse(await response.text())
+  } catch {
+    throw new Error('Backend unreachable')
+  }
 }
 
 const empty: Snapshot = { overview: null, integrity: null, payments: [], settlements: [], ledger: [], incidents: [], audit: [] }

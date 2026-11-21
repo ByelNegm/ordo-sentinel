@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle,
   Database, Fingerprint, FlaskConical, Layers3, LoaderCircle, LockKeyhole, Radio,
   RotateCcw, ScanLine, ShieldCheck, ShieldX, Terminal, TriangleAlert, Zap } from 'lucide-react'
-import type { Check as IntegrityCheck, Entry } from './types'
+import type { ChallengeVariant, Check as IntegrityCheck, Entry, SandboxChallenge } from './types'
 import { api, useBank } from './useBank'
 
 const money = (value: number) => (value / 100).toLocaleString('en-AE', { style: 'currency', currency: 'AED' })
@@ -57,8 +57,10 @@ export default function App() {
   const [pending, setPending] = useState('')
   const [results, setResults] = useState<Record<string, { error: boolean; text: string; raw?: string }>>({})
   const [ledgerOpen, setLedgerOpen] = useState(false)
+  const [challenge, setChallenge] = useState<{ response: SandboxChallenge; before: number; after: number; unchanged: boolean } | null>(null)
   const { overview, integrity, payments, settlements, ledger, incidents, audit } = data
   const incident = incidents[0]
+  useEffect(() => { setChallenge(null) }, [incident?.id])
   const service = overview?.services[0]
   const status = integrity?.status ?? overview?.integrity.status
   const passed = integrity?.checks.filter(check => check.pass).length
@@ -84,6 +86,28 @@ export default function App() {
     } catch (cause) {
       const text = cause instanceof Error ? cause.message : 'Request failed'
       setResults(old => ({ ...old, [key]: { error: true, text } }))
+    } finally {
+      await refresh()
+      setPending('')
+    }
+  }
+  async function attemptUnsafe(variant: ChallengeVariant) {
+    if (!incident || incident.status !== 'awaiting_approval') return
+    setPending('challenge')
+    setChallenge(null)
+    setResults(old => ({ ...old, challenge: { error: false, text: 'Checking isolated candidate…' } }))
+    try {
+      const [beforeRows, before] = await Promise.all([api('/ledger?limit=500'), api('/overview')])
+      const response: SandboxChallenge = await api('/incidents/' + incident.id + '/sandbox/challenge', { variant }, 'POST')
+      const [afterRows, after] = await Promise.all([api('/ledger?limit=500'), api('/overview')])
+      setChallenge({
+        response, before: before.totals.ledger_entries, after: after.totals.ledger_entries,
+        unchanged: response.ledger_unchanged && before.totals.ledger_entries === after.totals.ledger_entries
+          && JSON.stringify(beforeRows) === JSON.stringify(afterRows),
+      })
+      setResults(old => ({ ...old, challenge: { error: false, text: 'HTTP 200 · Isolated challenge completed' } }))
+    } catch (cause) {
+      setResults(old => ({ ...old, challenge: { error: true, text: cause instanceof Error ? cause.message : 'Backend unreachable' } }))
     } finally {
       await refresh()
       setPending('')
@@ -189,7 +213,25 @@ export default function App() {
       <section id="sandbox">
         <SectionTitle number="04" title="Recovery Sandbox" subtitle="Prove the correction in isolation. A human decides whether it reaches the ledger." />
         {!incident?.proposal ? <Panel title="Isolated recovery environment"><Empty>No proposal yet. Recovery proposals appear here after investigation and containment.</Empty></Panel> : <>
-          {incident.sandbox ? <div className={`sandbox-banner ${incident.sandbox.passed ? 'passed' : 'failed'}`}>{incident.sandbox.passed ? <ShieldCheck size={27} /> : <ShieldX size={27} />}<div><strong data-testid="sandbox-result">SANDBOX {incident.sandbox.passed ? 'PASSED' : 'FAILED'}</strong><p>{incident.sandbox.passed ? 'All seven checks pass on an isolated copy. The real ledger is untouched.' : 'Validation failed. Do not apply this proposal.'}</p></div><span className="method">ISOLATED COPY</span></div> : <div className="sandbox-banner"><LoaderCircle className="spin" /><strong>Sandbox validation in progress</strong></div>}
+          <div className="challenge-comparison">
+            {incident.sandbox ? <div className={`sandbox-banner ${incident.sandbox.passed ? 'passed' : 'failed'}`}>{incident.sandbox.passed ? <ShieldCheck size={27} /> : <ShieldX size={27} />}<div><strong data-testid="sandbox-result">SANDBOX {incident.sandbox.passed ? 'PASSED' : 'FAILED'}</strong><p>{incident.sandbox.passed ? 'All seven checks pass on an isolated copy. The real ledger is untouched.' : 'Validation failed. Do not apply this proposal.'}</p></div><span className="method">ISOLATED COPY</span></div> : <div className="sandbox-banner"><LoaderCircle className="spin" /><strong>Sandbox validation in progress</strong></div>}
+            <div className="panel challenge-controls">
+              <h3>Attempt unsafe correction</h3><p>Test a deliberately wrong candidate. Never apply it to the real ledger.</p>
+              <div className="challenge-buttons">
+                {([['wrong_amount', 'Wrong amount (+100 minor)'], ['reverse_original', 'Reverse original']] as const).map(([variant, title]) =>
+                  <button className="button danger-outline" key={variant} disabled={!!pending || incident.status !== 'awaiting_approval'} onClick={() => { void attemptUnsafe(variant) }}>
+                    {pending === 'challenge' ? <LoaderCircle className="spin" size={15} /> : <ShieldX size={15} />}{title}
+                  </button>)}
+              </div>
+              {challenge && <div className={`challenge-result ${challenge.response.sandbox.passed ? 'passed' : 'failed'}`}>
+                <strong data-testid="challenge-result">SANDBOX {challenge.response.sandbox.passed ? 'PASSED' : 'REJECTED'}</strong>
+                <p>Variant: <code>{challenge.response.variant}</code></p>
+                <Checks checks={challenge.response.sandbox.checks_after.filter(check => !check.pass)} compact />
+                <p className="ledger-proof">Real ledger {challenge.unchanged ? 'unchanged' : 'CHANGED'}: {challenge.before} entries before {challenge.before === challenge.after ? '=' : '≠'} {challenge.after} after</p>
+              </div>}
+              {result('challenge')}
+            </div>
+          </div>
           <Panel title="Proposed compensating entries" note={<span className="subtle">{incident.proposal.id}</span>}><p className="panel-description">{incident.proposal.description}</p><EntryTable entries={incident.proposal.entries} /></Panel>
           {incident.sandbox && <>
             <Panel title="Balance simulation" note={<span className="subtle">ONLY CHANGED ACCOUNTS HIGHLIGHTED</span>}><div className="table-scroll"><table><thead><tr><th>Account</th><th className="right">Before</th><th className="right">After</th><th className="right">Difference</th></tr></thead><tbody>{Object.entries(incident.sandbox.balances_before).map(([account, before]) => {
