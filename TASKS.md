@@ -2,16 +2,17 @@
 All target times: **2026-11-21, Asia/Dubai**. Check only when complete; append evidence/decisions to [PROGRESS.md](PROGRESS.md). Follow [GOAL.md](GOAL.md); new scope must pass its drift check. Backend branches api/*; frontend ui/*; PRs into main.
 
 ## Backend — ByelNegm + Devin
-- [ ] [ByelNegm + Devin] FastAPI skeleton, /api/state and fixtures served for development — **12:15**.
-- [ ] [ByelNegm + Devin] Mock bank + deterministic one-customer seed/baseline — **12:30**.
-- [ ] [ByelNegm + Devin] SSE stream, 15s heartbeat, X-Accel-Buffering: no — **12:45**.
-- [ ] [ByelNegm + Devin] asyncio normal/drain scenario runner — **13:00**.
-- [ ] [ByelNegm + Devin] Risk engine, customer stats and reason codes — **13:00**.
-- [ ] [ByelNegm + Devin] Policy: <40 allow, 40–75 hold, >75 or cumulative drain >30% freeze client — **13:15**.
-- [ ] [ByelNegm + Devin] Decision/unfreeze/reset endpoints; idempotency and runner cancellation — **13:30**.
-- [ ] [ByelNegm + Devin] Async cached LLM explainer + immediate EN/AR template fallback — **13:30**.
+- [x] [ByelNegm + Devin] FastAPI skeleton, /api/state and fixtures served for development — **12:15**.
+- [x] [ByelNegm + Devin] Mock bank + deterministic one-customer seed/baseline — **12:30**.
+- [x] [ByelNegm + Devin] SSE stream, 15s heartbeat, X-Accel-Buffering: no — **12:45**.
+- [x] [ByelNegm + Devin] asyncio normal/drain scenario runner — **13:00**.
+- [x] [ByelNegm + Devin] Risk engine, customer stats and reason codes — **13:00**.
+- [x] [ByelNegm + Devin] Policy: <40 allow, 40–75 hold, >75 or cumulative drain >30% freeze client — **13:15**.
+- [x] [ByelNegm + Devin] Decision/unfreeze/reset endpoints; idempotency and runner cancellation — **13:30**.
+- [x] [ByelNegm + Devin] Async cached LLM explainer + immediate EN/AR template fallback — **13:30**.
 - [ ] [ByelNegm + Devin] CORS/proxy check with frontend; Vite /api → :8000 — **13:45**.
-- [ ] [ByelNegm + Devin] pytest drain scenario, policy boundaries, duplicate deny, reset and LLM failure; measure freeze latency — **14:30**.
+- [x] [ByelNegm + Devin] pytest drain scenario, policy boundaries, duplicate deny, reset and LLM failure; measure requested SSE timestamp delta (0.0 ms, simulated timestamps, not wall-clock latency) — **14:30**.
+- [x] [ByelNegm + Devin] Backend REST/SSE integration: normal → drain → wire Deny → protected counter → reset, twice via live curl — **13:45**.
 
 ## Frontend — colleague + her Devin
 - [ ] [Frontend colleague + Devin] React/Vite/Tailwind skeleton, /phone and /analyst routes — **12:15**.
