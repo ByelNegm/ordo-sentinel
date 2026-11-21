@@ -86,6 +86,57 @@ def test_wire_explanation_uses_live_balance_after_normal_then_drain(monkeypatch)
     asyncio.run(run())
 
 
+def test_frozen_service_retries_are_blocked_while_card_payments_post(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    async def run():
+        app = create_app()
+        runner, bus = app.state.runner, app.state.bus
+        runner.pace = 0
+        frozen_client = "api_partner_7"
+        freeze_reason = "CLIENT_ALREADY_FROZEN"
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            async def start(name):
+                assert (await client.post(f"/api/scenario/{name}/start")).status_code == 200
+                await runner.task
+
+            try:
+                await start("normal")
+                await start("drain")
+                state = (await client.get("/api/state")).json()
+                assert state["account"]["balance"] == 519_915
+                assert state["frozen_clients"] == [frozen_client]
+                assert state["protected_amount"] == 0
+                response = await client.post("/api/alerts/alert_wire/decision", json={"decision": "deny"})
+                assert response.status_code == 200
+
+                async with bus.subscribe() as queue:
+                    await start("drain")
+                    retries = [e.data for e in queued_events(queue) if e.type == "txn.scored"]
+                    assert len(retries) == 3
+                    assert all(txn.client_id == frozen_client and txn.status == "blocked" for txn in retries)
+                    assert all(any(f.code == freeze_reason for f in txn.risk.factors) for txn in retries)
+                    assert retries[0].risk.score <= 75
+                    state = (await client.get("/api/state")).json()
+                    assert state["account"]["balance"] == 519_915
+
+                    await start("normal")
+                    purchases = [e.data for e in queued_events(queue) if e.type == "txn.scored"]
+                    assert sum(txn.amount for txn in purchases) == 85
+                    assert all(txn.channel == "card" and txn.status == "posted" for txn in purchases)
+                    assert all(not any(f.code == freeze_reason for f in txn.risk.factors) for txn in purchases)
+                    state = (await client.get("/api/state")).json()
+                    assert state["account"]["balance"] == 519_830
+                    assert state["frozen_clients"] == [frozen_client]
+                    assert state["protected_amount"] == 450_000
+            finally:
+                await runner.stop()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("choice", ["confirm", "deny"])
 def test_early_burst_decision_leaves_second_hold_actionable(monkeypatch, choice):
     async def run():
