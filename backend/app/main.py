@@ -1,93 +1,119 @@
-"""Lead-owned HTTP wiring; run one worker because demo state is process-local."""
+"""BLACKBOX HTTP/SSE wiring. One process, synthetic data, no production authorization."""
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 
-from .bank import Bank, BankError, FIXTURES
-from .bus import EventBus
-from .models import (AccountUpdated, AccountUpdatedEvent, Alert, AlertResolved,
-                     AlertResolvedEvent, DecisionRequest, ScenarioStatus,
-                     ScenarioStatusEvent, State, Txn)
-from .scenario import ScenarioRunner
+from .incident import ActionError
+from .models import (ActorRequest, AuditRecord, FaultResponse, Incident, IntegrityReport,
+                     JournalEntry, Overview, PaymentInstruction, Service, SettlementEvent,
+                     TrafficStatus)
+from .traffic import Runtime
 
 HEARTBEAT_SECONDS = 15
 
 
-def create_app() -> FastAPI:
-    bank, bus = Bank(), EventBus()
-    runner = ScenarioRunner(bank, bus)
+def create_app(*, traffic_interval: float = 1.5, step_delay: float = 1.0) -> FastAPI:
+    runtime = Runtime(traffic_interval, step_delay)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
-        await runner.stop()
+        await runtime.stop()
 
-    app = FastAPI(title="Ordo Sentinel", lifespan=lifespan)
-    app.state.bank, app.state.bus, app.state.runner = bank, bus, runner
-    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    app = FastAPI(title="BLACKBOX", lifespan=lifespan)
+    app.state.runtime = runtime
+    app.add_middleware(CORSMiddleware,
+                       allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                        allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
-    app.mount("/fixtures", StaticFiles(directory=FIXTURES), name="fixtures")
 
-    @app.exception_handler(BankError)
-    async def bank_error(request: Request, exc: BankError):
+    @app.exception_handler(ActionError)
+    async def action_error(request: Request, exc: ActionError):
         return JSONResponse(status_code=exc.status, content={"detail": exc.detail})
 
-    @app.get("/api/state", response_model=State)
-    async def state():
-        return bank.snapshot()
+    @app.get("/api/overview", response_model=Overview)
+    async def overview():
+        async with runtime.lock:
+            return runtime.overview()
 
-    @app.get("/api/transactions", response_model=list[Txn])
-    async def transactions(limit: int = Query(50, ge=1, le=200)):
-        return sorted(bank.transactions.values(), key=lambda t: t.ts, reverse=True)[:limit]
+    @app.get("/api/payments", response_model=list[PaymentInstruction])
+    async def payments(limit: int = Query(50, ge=1)):
+        async with runtime.lock:
+            return list(reversed(list(runtime.bank.instructions.values())))[:limit]
 
-    @app.get("/api/alerts", response_model=list[Alert])
-    async def alerts():
-        return list(bank.alerts.values())
+    @app.get("/api/settlements", response_model=list[SettlementEvent])
+    async def settlements(limit: int = Query(50, ge=1)):
+        async with runtime.lock:
+            return list(reversed(runtime.bank.events))[:limit]
 
-    @app.post("/api/scenario/{name}/start", response_model=ScenarioStatus)
-    async def start(name: Literal["normal", "drain"]):
-        if runner.running:
-            raise BankError(409, "Scenario already running")
-        return runner.start(name)
+    @app.get("/api/ledger", response_model=list[JournalEntry])
+    async def ledger(limit: int = Query(100, ge=1)):
+        async with runtime.lock:
+            return list(reversed(runtime.bank.ledger.entries))[:limit]
 
-    @app.post("/api/reset", response_model=State)
+    @app.get("/api/integrity", response_model=IntegrityReport)
+    async def integrity():
+        async with runtime.lock:
+            return runtime.coordinator.report()
+
+    @app.get("/api/incidents", response_model=list[Incident])
+    async def incidents():
+        async with runtime.lock:
+            return list(reversed(list(runtime.coordinator.incidents.values())))
+
+    @app.get("/api/incidents/{identifier}", response_model=Incident)
+    async def incident(identifier: str):
+        async with runtime.lock:
+            return runtime.coordinator.get(identifier)
+
+    @app.get("/api/audit", response_model=list[AuditRecord])
+    async def audit(limit: int = Query(100, ge=1)):
+        async with runtime.lock:
+            return list(reversed(runtime.coordinator.audit))[:limit]
+
+    @app.post("/api/reset", response_model=Overview)
     async def reset():
-        await runner.stop()
-        result = bank.reset()
-        now = datetime.now(timezone.utc)
-        await bus.publish(AccountUpdatedEvent(ts=now, data=bank.account_update()))
-        await bus.publish(ScenarioStatusEvent(ts=now, data=ScenarioStatus(name="idle", step=0, total=0)))
-        return result
+        return await runtime.reset()
 
-    @app.post("/api/alerts/{alert_id}/decision", response_model=AlertResolved)
-    async def decision(alert_id: str, body: DecisionRequest):
-        result = bank.resolve(alert_id, body.decision)
-        now = datetime.now(timezone.utc)
-        await bus.publish(AlertResolvedEvent(ts=now, data=result))
-        await bus.publish(AccountUpdatedEvent(ts=now, data=bank.account_update()))
-        return result
+    @app.post("/api/traffic/start", response_model=TrafficStatus)
+    async def traffic_start():
+        return await runtime.set_traffic(True)
 
-    @app.post("/api/clients/{client_id}/unfreeze", response_model=AccountUpdated)
-    async def unfreeze(client_id: str):
-        result = bank.unfreeze(client_id)
-        await bus.publish(AccountUpdatedEvent(ts=datetime.now(timezone.utc), data=result))
-        return result
+    @app.post("/api/traffic/stop", response_model=TrafficStatus)
+    async def traffic_stop():
+        return await runtime.set_traffic(False)
+
+    @app.post("/api/faults/{kind}", response_model=FaultResponse)
+    async def fault(kind: Literal["duplicate", "missing", "tamper"]):
+        return await runtime.inject(kind)
+
+    @app.post("/api/incidents/{identifier}/approve", response_model=Incident)
+    async def approve(identifier: str, body: ActorRequest):
+        async with runtime.lock:
+            return await runtime.coordinator.approve(identifier, body.actor)
+
+    @app.post("/api/incidents/{identifier}/reject", response_model=Incident)
+    async def reject(identifier: str, body: ActorRequest):
+        async with runtime.lock:
+            return await runtime.coordinator.reject(identifier, body.actor)
+
+    @app.post("/api/services/settlement-svc/release", response_model=Service)
+    async def release():
+        return await runtime.release()
 
     @app.get("/api/stream")
     async def stream(request: Request):
         async def frames():
-            async with bus.subscribe() as queue:
+            async with runtime.bus.subscribe() as queue:
                 yield ": connected\n\n"
                 while not await request.is_disconnected():
                     try:
                         event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
-                        yield f"data: {event.model_dump_json()}\n\n"
+                        yield (f"event: {event.type}\n"
+                               f"data: {event.model_dump_json(by_alias=True)}\n\n")
                     except asyncio.TimeoutError:
                         yield ": heartbeat\n\n"
         return StreamingResponse(frames(), media_type="text/event-stream",
