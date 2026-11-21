@@ -52,7 +52,7 @@ This kept the concurrent sessions aligned without a human relaying context betwe
 | Live curl flows: duplicate, missing, tamper | All 3 passed: reset → detection → sandbox → agent 403 → approval → idempotent repeat → 7/7 → release (1 held payment released) |
 | UI acceptance (Playwright, live backend) | Full duplicate flow passed through the console |
 | UI timing, 5 consecutive runs in one page with no reload | All PASS. Duplicate inject → awaiting_approval 5.3–5.7s, full cycle about 8s; missing 8.9s / 11.6s; tamper 5.9s / 8.4s |
-| Sandbox challenge | An unsafe fix is rejected with the failing checks named; real ledger entry count unchanged; approving the agent's proposal afterwards restores 7/7 |
+| Sandbox challenge | Unsafe fixes rejected with truthful reasons (Lineage Guard for reverse original; ledger guard for wrong amount); real ledger unchanged; approving the agent's proposal afterwards restores 7/7 |
 | Review gate | P0 PASSED; P2 MUST_FIX fixed (409 gate, `f13b2e4`) |
 | Devin Review on PR #7 | 3 bugs found, all resolved |
 
