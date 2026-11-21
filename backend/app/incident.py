@@ -9,7 +9,7 @@ from .integrity import (extra_postings, inspect, intent_lines, restored_instruct
 from .ledger import reversed_lines
 from .models import (Approval, AuditAppended, AuditRecord, Containment, Incident,
                      IncidentUpdated, IntegrityUpdated, JournalEntry, Lineage, Proposal,
-                     RootCause, SandboxReport, ServiceUpdated, SettlementEvent,
+                     RootCause, SandboxChallengeResponse, SandboxReport, ServiceUpdated, SettlementEvent,
                      SettlementPosted, PostedSettlement, TimelineItem, utcnow)
 from .settlement import SettlementService
 
@@ -239,6 +239,45 @@ class IncidentCoordinator:
         incident.status = status
         await self.bus.publish(self.record(AGENT, action, incident.id, detail))
         await self.bus.publish(IncidentUpdated(ts=utcnow(), data=incident.model_copy(deep=True)))
+
+    async def challenge(self, identifier: str, variant: str) -> SandboxChallengeResponse:
+        """Caller holds the runtime lock; only a detached incident is challenged."""
+        incident = self.get(identifier)
+        if incident.status != "awaiting_approval" or incident.proposal is None:
+            raise ActionError(409, "Incident is not awaiting approval")
+        if variant not in {"wrong_amount", "reverse_original"}:
+            raise ActionError(422, "Unknown sandbox challenge variant")
+        candidate = incident.model_copy(deep=True)
+        candidate.proposal.id = f"challenge-{identifier}-{variant}"
+        candidate.proposal.description = f"Unsafe correction challenge: {variant}"
+        if variant == "wrong_amount":
+            for entry in candidate.proposal.entries:
+                for line in entry.lines:
+                    line.amount_minor += 100
+        elif incident.type == "duplicate_settlement":
+            for entry in candidate.proposal.entries:
+                original = next(e for e in self.bank.ledger.entries
+                                if e.kind == "settlement" and e.instruction_id == entry.instruction_id)
+                entry.corrects_entry_id = original.id
+                entry.lines = JournalEntry.model_validate({
+                    **entry.model_dump(), "lines": reversed_lines(original),
+                }).lines
+        else:
+            for entry in candidate.proposal.entries:
+                if entry.corrects_entry_id is None:
+                    for line in entry.lines:
+                        line.side = "credit" if line.side == "debit" else "debit"
+        before = self.bank.ledger.serialize()
+        report = self.sandbox(candidate)
+        result = SandboxChallengeResponse(
+            variant=variant, proposal=candidate.proposal, sandbox=report,
+            ledger_unchanged=before == self.bank.ledger.serialize(),
+        )
+        await self.bus.publish(self.record(
+            AGENT, "sandbox.challenge.rejected", identifier,
+            f"{variant}; failing checks: " + ", ".join(c.name for c in report.checks_after if not c.passed),
+        ))
+        return result
 
     async def _pipeline(self, identifier: str) -> None:
         try:
