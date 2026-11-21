@@ -46,7 +46,7 @@ export function useBank() {
       const requestedVersion = version
       try {
         const [overview, integrity, payments, settlements, ledger, incidents, audit] = await Promise.all(
-          ['/overview', '/integrity', '/payments?limit=50', '/settlements?limit=50',
+          ['/overview', '/integrity', '/payments?limit=500', '/settlements?limit=50',
             '/ledger?limit=500', '/incidents', '/audit?limit=100'].map(path => api(path)),
         )
         if (alive && version === requestedVersion) {

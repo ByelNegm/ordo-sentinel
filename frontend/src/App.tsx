@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle,
   Database, Fingerprint, FlaskConical, Layers3, LoaderCircle, LockKeyhole, Radio,
   RotateCcw, ScanLine, ShieldCheck, ShieldX, Terminal, TriangleAlert, Zap } from 'lucide-react'
 import type { ChallengeVariant, Check as IntegrityCheck, Entry, SandboxChallenge } from './types'
 import { api, useBank } from './useBank'
+import { createDisplay } from './display'
+import { deriveWorkflow, workflowSteps } from './workflow'
+
+const DisplayContext = createContext(createDisplay([], [], []))
 
 const money = (value: number) => (value / 100).toLocaleString('en-AE', { style: 'currency', currency: 'AED' })
 const label = (value: string) => value.replaceAll('_', ' ')
@@ -31,22 +35,28 @@ function SectionTitle({ number, title, subtitle }: { number: string; title: stri
   return <div className="section-title"><span className="section-number">{number}</span><div><h2>{title}</h2><p>{subtitle}</p></div></div>
 }
 function Checks({ checks, compact = false }: { checks: IntegrityCheck[]; compact?: boolean }) {
+  const display = useContext(DisplayContext)
   return <div className={compact ? 'check-list' : 'checks-grid'}>{checks.map(check =>
-    <div className={`integrity-check ${check.pass ? 'pass' : 'fail'}`} key={check.name} title={check.detail}>
+    <div className={`integrity-check ${check.pass ? 'pass' : 'fail'}`} key={check.name} title={display.humanize(check.detail)}>
       {check.pass ? <ShieldCheck size={17} /> : <ShieldX size={17} />}
-      <div><strong>{label(check.name)}</strong><small>{compact ? check.detail : check.pass ? 'PASS' : 'FAIL'}</small></div>
+      <div><strong>{label(check.name)}</strong><small>{compact ? display.humanize(check.detail) : check.pass ? 'PASS' : 'FAIL'}</small></div>
       {compact && <span className="check-result">{check.pass ? 'PASS' : 'FAIL'}</span>}
     </div>)}</div>
 }
 function Empty({ children }: { children: ReactNode }) {
   return <div className="empty"><ScanLine size={26} /><p>{children}</p></div>
 }
+function AccountView({ id }: { id: string }) {
+  const display = useContext(DisplayContext)
+  return <span className="account-label"><b>{display.accountName(id)}</b><small className="mono">{display.iban(id)}</small></span>
+}
 function EntryTable({ entries, originals = false }: { entries: Entry[]; originals?: boolean }) {
+  const display = useContext(DisplayContext)
   return <div className="table-scroll"><table className="entries"><thead><tr><th>Journal entry / instruction</th><th>Posting lines</th><th>{originals ? 'Original preserved' : 'Corrects entry'}</th><th>Actor</th></tr></thead>
     <tbody>{entries.map(entry => <tr key={entry.id} id={'ledger-' + entry.id}>
-      <td><span className="mono">{entry.id}</span><small>{entry.instruction_id} · {entry.kind}</small></td>
-      <td>{entry.lines.map((line, i) => <div className="posting" key={i}><span>{line.side === 'debit' ? 'DR' : 'CR'} <b>{line.account}</b></span><span>{money(line.amount_minor)}</span></div>)}</td>
-      <td className="mono">{entry.corrects_entry_id ?? 'New intent effect'}</td><td>{entry.actor}</td>
+      <td><span className="mono">{display.reference(entry.instruction_id)}</span><small>{display.purpose(entry.instruction_id)} · {entry.kind}</small><small>{display.journal(entry.id)}</small></td>
+      <td>{entry.lines.map((line, i) => <div className="posting" key={i}><span>{line.side === 'debit' ? 'DR' : 'CR'} <AccountView id={line.account} /></span><span>{money(line.amount_minor)}</span></div>)}</td>
+      <td>{entry.corrects_entry_id ? display.journal(entry.corrects_entry_id) : 'New intent effect'}</td><td>{entry.actor}</td>
     </tr>)}</tbody></table></div>
 }
 
@@ -59,7 +69,11 @@ export default function App() {
   const [ledgerOpen, setLedgerOpen] = useState(false)
   const [challenge, setChallenge] = useState<{ response: SandboxChallenge; before: number; after: number; unchanged: boolean } | null>(null)
   const { overview, integrity, payments, settlements, ledger, incidents, audit } = data
+  const display = createDisplay(overview?.accounts ?? [], payments, ledger)
   const incident = incidents[0]
+  const workflow = deriveWorkflow(overview, incident)
+  const workflowRef = useRef<HTMLDivElement>(null)
+  const lastStage = useRef(-1)
   useEffect(() => { setChallenge(null) }, [incident?.id])
   const service = overview?.services[0]
   const status = integrity?.status ?? overview?.integrity.status
@@ -69,6 +83,31 @@ export default function App() {
   const navigate = (id: string) => {
     setActive(id)
     document.getElementById(id)?.scrollIntoView({ block: 'start' })
+  }
+  useLayoutEffect(() => {
+    const element = workflowRef.current
+    if (!element) return
+    const update = () => document.documentElement.style.setProperty('--workspace-offset', Math.ceil(element.getBoundingClientRect().bottom + 16) + 'px')
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  useEffect(() => {
+    if (workflow.index >= 0 && lastStage.current !== workflow.index) {
+      lastStage.current = workflow.index
+      navigate(workflow.index === 0 ? 'bank' : workflow.section)
+    }
+  }, [workflow.index])
+  const guideNext = () => {
+    navigate(workflow.section)
+    requestAnimationFrame(() => {
+      const element = document.querySelector<HTMLElement>(workflow.target)
+      if (!element) return
+      element.focus({ preventScroll: true })
+      element.classList.add('next-control-pulse')
+      element.addEventListener('animationend', () => element.classList.remove('next-control-pulse'), { once: true })
+    })
   }
   async function act(key: string, path: string, body?: unknown) {
     setPending(key)
@@ -114,15 +153,14 @@ export default function App() {
     }
   }
   const result = (key: string) => results[key] && <div className={`action-result ${results[key].error ? 'error-result' : ''}`} role={results[key].error ? 'alert' : 'status'}>
-    {results[key].error ? <TriangleAlert size={14} /> : <Check size={14} />}<span>{results[key].text}</span>
-    {results[key].raw && <details><summary>Response</summary><pre>{results[key].raw}</pre></details>}
+    {results[key].error ? <TriangleAlert size={14} /> : <Check size={14} />}<span>{display.humanize(results[key].text)}</span>
   </div>
   const actionButton = (key: string, title: string, path: string, style = '', disabled = false, body?: unknown) =>
-    <button className={`button ${style}`} disabled={!!pending || disabled || !overview} onClick={() => { void act(key, path, body) }}>
+    <button data-action={key} className={`button ${style}`} disabled={!!pending || disabled || !overview} onClick={() => { void act(key, path, body) }}>
       {pending === key ? <LoaderCircle className="spin" size={16} /> : key === 'reset' ? <RotateCcw size={15} /> : key === 'approve' ? <LockKeyhole size={15} /> : <ChevronRight size={15} />}{title}
     </button>
 
-  return <div className="app-shell">
+  return <DisplayContext.Provider value={display}><div className="app-shell">
     <aside className="rail">
       <a className="brand" href="#bank" onClick={() => navigate('bank')}><span className="brand-mark"><ScanLine size={25} /></span><span>BLACKBOX<small>INTEGRITY INFRASTRUCTURE</small></span></a>
       <div className="rail-label">OPERATIONS CONSOLE <span>v1.0</span></div>
@@ -142,14 +180,18 @@ export default function App() {
       </div>
     </header>
 
+    <div className="workflow-strip" ref={workflowRef} role="region" aria-label="Guided workflow">
+      <ol className="workflow-steps">{workflowSteps.map((step, index) => <li key={step.title} className={index === workflow.index ? 'current' : index < workflow.index ? 'complete' : ''} aria-current={index === workflow.index ? 'step' : undefined}><span>{index < workflow.index ? '✓' : index + 1}</span><div><strong>{step.title}</strong><small>{step.caption}</small></div></li>)}</ol>
+      <div className="workflow-next"><p data-testid="workflow-caption">{workflow.caption}</p><button className="button primary" data-testid="workflow-next" aria-label={'Go to control: ' + workflow.action} disabled={!overview || !connected} onClick={guideNext}>{workflow.action}<ArrowRight size={15} /></button></div>
+    </div>
     <main>
-      {(error || !connected) && <div className="connection-banner" role="status"><Radio size={16} />{error || 'Event stream reconnecting; displayed data may be stale.'}<button onClick={() => { void refresh() }}>Retry connection</button></div>}
+      {(error || !connected) && <div className="connection-banner" role="status"><Radio size={16} />{error ? display.humanize(error) : 'Event stream reconnecting; displayed data may be stale.'}<button onClick={() => { void refresh() }}>Retry connection</button></div>}
       <section id="bank">
         <div className="eyebrow"><span className="live-dot dot" /> AUTONOMOUS BANKING INCIDENT RECONSTRUCTION & RECOVERY</div>
         <div className="hero"><div><div className="overline">BANK OPERATIONS / LIVE MONITOR</div>
           <h1>{!overview ? 'Connecting to the bank.' : status === 'violated' ? 'Balanced. But not correct.' : status === 'recovering' ? 'Recovery in progress.' : incident?.status === 'resolved' ? 'Integrity restored.' : 'Trust, independently verified.'}</h1>
           <p>Reconcile what happened against what should have happened.</p></div><div className="environment"><span className="dot live-dot" /> SYNTHETIC BANK<small>Real ledger. Real fault paths.</small></div></div>
-        <div className="metric-grid">
+        <div className="metric-grid" id="live-bank-metrics">
           <div className="metric"><span><Activity size={16} /> PAYMENT VOLUME</span><strong>{overview?.volume.instructions.toLocaleString() ?? '—'}<small>instructions</small></strong><div>{overview?.volume.settled ?? '—'} settled <i />{overview?.volume.held ?? '—'} held <i />{overview?.volume.pending ?? '—'} pending</div></div>
           <div className="metric"><span><ArrowUpRight size={16} /> TOTAL DEBITS</span><strong className="money">{overview ? money(overview.totals.debits_minor) : '—'}</strong><div>{overview?.totals.ledger_entries ?? '—'} append-only journal entries</div></div>
           <div className="metric"><span><ArrowDownLeft size={16} /> TOTAL CREDITS</span><strong className="money">{overview ? money(overview.totals.credits_minor) : '—'}</strong><div className={balanced === null ? '' : balanced ? 'green-text' : 'red-text'}>{balanced === null ? 'Waiting for ledger' : balanced ? '✓ Debits equal credits' : 'Debits and credits differ'}<b className="balanced-note">Balanced ≠ correct</b></div></div>
@@ -158,21 +200,21 @@ export default function App() {
           {integrity ? <Checks checks={integrity.checks} /> : <Empty>Loading independent integrity checks…</Empty>}
         </Panel>
         <div className="bank-grid">
-          <Panel title="Payment instructions" note={<span className="subtle">LATEST {payments.length} <span className="cyan-text">/ LIVE</span></span>}>
+          <Panel title="Payment instructions" note={<span className="subtle">LATEST {Math.min(payments.length, 50)} <span className="cyan-text">/ LIVE</span></span>}>
             <div className="table-scroll payment-scroll"><table><thead><tr><th>Instruction</th><th>Debtor → Creditor</th><th className="right">Amount</th><th>Status</th><th>Effects</th></tr></thead><tbody>
-              {payments.map(payment => <tr key={payment.id} className={payment.settlement_count > 1 || ['missing', 'discrepancy'].includes(payment.status) ? 'anomaly-row' : ''}>
-                <td className="mono">{payment.id.replace('payment-', 'PAY-')}<small>{clock(payment.created_at)}</small></td><td>{payment.debtor}<span className="route-arrow">→</span>{payment.creditor}</td>
+              {payments.slice(0, 50).map(payment => <tr key={payment.id} className={payment.settlement_count > 1 || ['missing', 'discrepancy'].includes(payment.status) ? 'anomaly-row' : ''}>
+                <td className="mono">{display.reference(payment.id)}<small>{payment.purpose} · {display.purpose(payment.id)}</small><small>{clock(payment.created_at)}</small></td><td><AccountView id={payment.debtor} /><span className="route-arrow">→</span><AccountView id={payment.creditor} /></td>
                 <td className="right tabular">{money(payment.amount_minor)}</td><td><Badge value={payment.status} /></td>
                 <td><span className={payment.settlement_count > 1 ? 'effect duplicate' : 'effect'}>{payment.settlement_count > 1 ? '×' : ''}{payment.settlement_count}</span></td></tr>)}
             </tbody></table>{!payments.length && <Empty>No payment instructions received.</Empty>}</div>
           </Panel>
           <Panel title="Settlement events" note={<Radio size={15} className="cyan-text" />}>
-            <div className="event-feed">{settlements.slice(0, 14).map(event => <div className="feed-event" key={event.id}><span className="event-icon"><ArrowRight size={14} /></span><div><strong className="mono">{event.id}</strong><small>{event.instruction_id} · seq {event.seq}</small><span>{money(event.amount_minor)}</span></div><time>{clock(event.ts)}</time></div>)}
+            <div className="event-feed">{settlements.slice(0, 14).map(event => <div className="feed-event" key={event.id}><span className="event-icon"><ArrowRight size={14} /></span><div><strong className="mono">{display.reference(event.instruction_id)}</strong><small>{display.purpose(event.instruction_id)} · Settlement #{event.seq}</small><span>{money(event.amount_minor)}</span></div><time>{clock(event.ts)}</time></div>)}
               {!settlements.length && <Empty>No settlement events received.</Empty>}</div>
           </Panel>
         </div>
         <details className="disclosure"><summary><Database size={16} /> Account balances <span>{overview?.accounts.length ?? 0} ACCOUNTS · DERIVED FROM POSTINGS</span></summary>
-          <div className="table-scroll"><table><thead><tr><th>Account</th><th>Name</th><th>Type</th><th className="right">Balance</th></tr></thead><tbody>{overview?.accounts.map(account => <tr key={account.id}><td className="mono">{account.id}</td><td>{account.name}</td><td>{account.type}</td><td className="right tabular">{money(account.balance_minor)}</td></tr>)}</tbody></table></div>
+          <div className="table-scroll"><table><thead><tr><th>Account / masked IBAN</th><th>Type</th><th className="right">Balance</th></tr></thead><tbody>{overview?.accounts.map(account => <tr key={account.id}><td><AccountView id={account.id} /></td><td>{account.type}</td><td className="right tabular">{money(account.balance_minor)}</td></tr>)}</tbody></table></div>
         </details>
         <details className="disclosure" open={ledgerOpen} onToggle={event => setLedgerOpen(event.currentTarget.open)}><summary><Layers3 size={16} /> Append-only ledger <span>LATEST {ledger.length} ENTRIES · ORIGINALS PRESERVED</span></summary><EntryTable entries={ledger} /></details>
       </section>
@@ -195,18 +237,19 @@ export default function App() {
       <section id="investigation">
         <SectionTitle number="03" title="Incident Investigation" subtitle="Follow the evidence. Reconstruct the failure. Isolate the source." />
         {!incident ? <Panel title="Investigation workspace"><Empty>No incidents. Monitoring independent payment intent for integrity violations.</Empty></Panel> : <>
-          <div className="incident-header"><span className="mono cyan-text">{incident.id}</span><span>{label(incident.type)}</span><Badge value={incident.status}><span data-testid="incident-status">{label(incident.status)}</span></Badge><span className="subtle">NEWEST INCIDENT · {incidents.length} TOTAL</span></div>
+          <p className="incident-summary" data-testid="incident-summary">{incident.summary_text ?? 'Reconstructing the payment from independent evidence…'}</p>
+          <div className="incident-header"><span className="cyan-text">Settlement recovery</span><span>{label(incident.type)}</span><Badge value={incident.status}><span data-testid="incident-status">{label(incident.status)}</span></Badge><span className="subtle">NEWEST INCIDENT · {incidents.length} TOTAL</span></div>
           <div className="stepper">{stages.map((stage, index) => <div key={stage} className={incident.status === stage ? 'step current' : stages.indexOf(incident.status) > index ? 'step done' : 'step'}><span>{stages.indexOf(incident.status) > index ? <Check size={13} /> : String(index + 1).padStart(2, '0')}</span><b>{label(stage)}</b></div>)}</div>
           <div className="investigation-grid">
             <Panel title="Root cause" note={<span className="method">{incident.root_cause.method === 'deterministic' ? 'Deterministic' : incident.root_cause.method}</span>}>
-              <div className="root-cause"><div className="root-service"><Terminal size={18} /><strong>{incident.root_cause.service}</strong><span>{incident.root_cause.confidence} confidence</span></div><p>{incident.root_cause.summary}</p><div className="impact"><span>FINANCIAL IMPACT</span><strong>{money(incident.impact_minor)}</strong><small>{incident.affected_payments.length} affected payment{incident.affected_payments.length === 1 ? '' : 's'} · {incident.affected_accounts.join(', ')}</small></div></div>
+              <div className="root-cause"><div className="root-service"><Terminal size={18} /><strong>{incident.root_cause.service}</strong><span>{incident.root_cause.confidence} confidence</span></div><p>{display.humanize(incident.root_cause.summary)}</p><div className="impact"><span>FINANCIAL IMPACT</span><strong>{money(incident.impact_minor)}</strong><small>{incident.affected_payments.length} affected payment{incident.affected_payments.length === 1 ? '' : 's'} · {incident.affected_accounts.map(display.accountName).join(', ')}</small></div></div>
             </Panel>
             <Panel title="Containment" note={<LockKeyhole size={16} />}>{incident.containment ? <div className="containment"><Badge value={service?.status ?? 'quarantined'} /><h3>{incident.containment.service}</h3><p>Quarantine applied at {clock(incident.containment.at)}. Held payments remain queued until service release.</p><strong>{overview?.volume.held ?? incident.containment.held_instructions}<small>instructions currently held</small></strong><span className="subtle">{incident.containment.held_instructions} held in latest incident evidence</span></div> : <Empty>Investigation is running. No containment action recorded yet.</Empty>}</Panel>
           </div>
           <Panel title="Evidence lineage" note={<span className="subtle">INDEPENDENT INTENT → EVENT → JOURNAL</span>}>
-            <div className="lineages">{incident.lineage.length ? incident.lineage.map(line => <div className="lineage" key={line.instruction_id}><div><small>PAYMENT INSTRUCTION</small><strong className="mono">{line.instruction_id}</strong></div><ArrowRight size={18} /><div><small>SETTLEMENT EVENTS</small>{line.event_ids.length ? line.event_ids.map(id => <code key={id}>{id}</code>) : <em>No event recorded</em>}</div><ArrowRight size={18} /><div><small>LEDGER ENTRIES</small>{line.entry_ids.length ? line.entry_ids.map(id => <code key={id}>{id}</code>) : <em>No posting recorded</em>}</div></div>) : <Empty>Reconstructing lineage from independent evidence…</Empty>}</div>
+            <div className="lineages">{incident.lineage.length ? incident.lineage.map(line => <div className="lineage" key={line.instruction_id}><div><small>PAYMENT INSTRUCTION</small><strong className="mono">{display.reference(line.instruction_id)}</strong><small>{display.purpose(line.instruction_id)}</small><small className="evidence-id">{line.instruction_id}</small></div><ArrowRight size={18} /><div><small>SETTLEMENT EVENTS</small>{line.event_ids.length ? line.event_ids.map(id => <code className="evidence-id" key={id}>{id}</code>) : <em>No event recorded</em>}</div><ArrowRight size={18} /><div><small>LEDGER ENTRIES</small>{line.entry_ids.length ? line.entry_ids.map(id => <code className="evidence-id" key={id}>{id}</code>) : <em>No posting recorded</em>}</div></div>) : <Empty>Reconstructing lineage from independent evidence…</Empty>}</div>
           </Panel>
-          <Panel title="Evidence timeline" note={<span className="subtle">{incident.timeline.length} RECORDED EVENTS</span>}><div className="timeline">{incident.timeline.map((item, index) => <div className="timeline-item" key={index}><span className="timeline-node" /><time>{clock(item.ts)}</time><span className="timeline-kind">{label(item.kind)}</span><p>{item.detail}<small className="mono">{item.ref}</small></p></div>)}</div></Panel>
+          <Panel title="Evidence timeline" note={<span className="subtle">{incident.timeline.length} RECORDED EVENTS</span>}><div className="timeline">{incident.timeline.map((item, index) => <div className="timeline-item" key={index}><span className="timeline-node" /><time>{clock(item.ts)}</time><span className="timeline-kind">{label(item.kind)}</span><p>{display.humanize(item.detail)}<small className="mono evidence-id">{item.ref}</small></p></div>)}</div></Panel>
         </>}
       </section>
 
@@ -225,18 +268,19 @@ export default function App() {
               </div>
               {challenge && <div className={`challenge-result ${challenge.response.sandbox.passed ? 'passed' : 'failed'}`}>
                 <strong data-testid="challenge-result">SANDBOX {challenge.response.sandbox.passed ? 'PASSED' : 'REJECTED'}</strong>
-                <p>Variant: <code>{challenge.response.variant}</code></p>
-                <Checks checks={challenge.response.sandbox.checks_after.filter(check => !check.pass)} compact />
+                <p>Variant: {label(challenge.response.variant)}</p>
+                <ul className="rejection-reasons">{challenge.response.rejection_reasons.map((reason, index) => <li key={index}><strong>{label(reason.rule)}</strong><span>{display.humanize(reason.detail)}</span></li>)}</ul>
+                <p data-testid="challenge-applied">{challenge.response.applied ? `Integrity checks after applying: ${challenge.response.sandbox.checks_after.filter(check => check.pass).length}/7` : 'Blocked before applying to the sandbox copy'}</p>
                 <p className="ledger-proof">Real ledger {challenge.unchanged ? 'unchanged' : 'CHANGED'}: {challenge.before} entries before {challenge.before === challenge.after ? '=' : '≠'} {challenge.after} after</p>
               </div>}
               {result('challenge')}
             </div>
           </div>
-          <Panel title="Proposed compensating entries" note={<span className="subtle">{incident.proposal.id}</span>}><p className="panel-description">{incident.proposal.description}</p><EntryTable entries={incident.proposal.entries} /></Panel>
+          <Panel title="Proposed compensating entries" note={<span className="subtle">HUMAN APPROVAL REQUIRED</span>}><p className="panel-description">{incident.proposal.description}</p><EntryTable entries={incident.proposal.entries} /></Panel>
           {incident.sandbox && <>
             <Panel title="Balance simulation" note={<span className="subtle">ONLY CHANGED ACCOUNTS HIGHLIGHTED</span>}><div className="table-scroll"><table><thead><tr><th>Account</th><th className="right">Before</th><th className="right">After</th><th className="right">Difference</th></tr></thead><tbody>{Object.entries(incident.sandbox.balances_before).map(([account, before]) => {
               const after = incident.sandbox!.balances_after[account]
-              return <tr className={before !== after ? 'changed-row' : 'unchanged-row'} key={account}><td className="mono">{account}</td><td className="right tabular">{money(before)}</td><td className="right tabular">{money(after)}</td><td className="right tabular">{before === after ? '—' : money(after - before)}</td></tr>
+              return <tr className={before !== after ? 'changed-row' : 'unchanged-row'} key={account}><td><AccountView id={account} /></td><td className="right tabular">{money(before)}</td><td className="right tabular">{money(after)}</td><td className="right tabular">{before === after ? '—' : money(after - before)}</td></tr>
             })}</tbody></table></div></Panel>
             <div className="two-columns"><Panel title="Before correction"><Checks checks={incident.sandbox.checks_before} compact /></Panel><Panel title="After correction"><Checks checks={incident.sandbox.checks_after} compact /></Panel></div>
           </>}
@@ -253,12 +297,12 @@ export default function App() {
         {incident?.verification ? <>
           <div className={`verification-hero ${incident.status === 'resolved' ? 'verified' : 'failed'}`}><span className="verification-icon">{incident.status === 'resolved' ? <ShieldCheck size={38} /> : <ShieldX size={38} />}</span><div><div className="overline">REAL LEDGER VERIFICATION</div><h2>{incident.status === 'resolved' ? 'INTEGRITY RESTORED' : 'VERIFICATION FAILED'}</h2><p>{incident.verification.checks.filter(check => check.pass).length}/7 checks passing · {incident.corrections.length} append-only correction{incident.corrections.length === 1 ? '' : 's'} · original history preserved</p></div><Badge value={incident.status} /></div>
           <Panel title="Verified integrity checks"><Checks checks={incident.verification.checks} /></Panel>
-          <Panel title="Applied corrections" note={<span className="subtle">NO HISTORY REWRITTEN</span>}><EntryTable entries={corrections} originals /><div className="preserved">{corrections.map(entry => <p key={entry.id}><Check size={14} />{entry.corrects_entry_id ? <>Original preserved: <a className="mono" href={'#ledger-' + entry.corrects_entry_id} onClick={() => setLedgerOpen(true)}>{entry.corrects_entry_id}</a></> : <>Missing/correct intent effect appended for <code>{entry.instruction_id}</code></>}</p>)}{incident.approval && <p><LockKeyhole size={14} />Approved by {incident.approval.actor} at {clock(incident.approval.at)}</p>}</div></Panel>
+          <Panel title="Applied corrections" note={<span className="subtle">NO HISTORY REWRITTEN</span>}><EntryTable entries={corrections} originals /><div className="preserved">{corrections.map(entry => <p key={entry.id}><Check size={14} />{entry.corrects_entry_id ? <>Original preserved: <button className="text-link mono" onClick={() => { setLedgerOpen(true); setActive('bank'); requestAnimationFrame(() => document.getElementById('ledger-' + entry.corrects_entry_id)?.scrollIntoView({ block: 'start' })) }}>{display.journal(entry.corrects_entry_id)}</button></> : <>Missing/correct intent effect appended for <code>{display.reference(entry.instruction_id)}</code></>}</p>)}{incident.approval && <p><LockKeyhole size={14} />Approved by {incident.approval.actor} at {clock(incident.approval.at)}</p>}</div></Panel>
         </> : <Panel title="Post-recovery verification"><Empty>No corrections applied. Verification results appear after an authorized recovery.</Empty></Panel>}
         <div className="release-strip"><div><Radio size={20} /><span><strong>Release settlement-svc</strong><small>{overview?.volume.held ?? '—'} held instructions · service {service?.status ?? 'unavailable'}. Requires no open incidents.</small></span></div>{actionButton('release', 'Release settlement-svc', '/services/settlement-svc/release', 'primary', service?.status !== 'quarantined' || (overview?.open_incidents ?? 1) > 0)}{result('release')}</div>
-        <Panel title="Audit trail" note={<span className="subtle">LATEST {audit.length} RECORDS · ALL ACTIONS ACCOUNTABLE</span>}><div className="table-scroll audit-scroll"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Reference / detail</th></tr></thead><tbody>{audit.map(record => <tr key={record.id}><td className="mono">{clock(record.ts)}</td><td>{record.actor}</td><td><span className="audit-action">{record.action}</span></td><td><span className="mono">{record.ref ?? '—'}</span><small>{record.detail}</small></td></tr>)}</tbody></table>{!audit.length && <Empty>No audit records received.</Empty>}</div></Panel>
+        <Panel title="Audit trail" note={<span className="subtle">LATEST {audit.length} RECORDS · ALL ACTIONS ACCOUNTABLE</span>}><div className="table-scroll audit-scroll"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Reference / detail</th></tr></thead><tbody>{audit.map(record => <tr key={record.id}><td className="mono">{clock(record.ts)}</td><td>{record.actor}</td><td><span className="audit-action">{label(record.action)}</span></td><td><span>{display.humanize(record.ref ?? '—')}</span><small>{display.humanize(record.detail)}</small></td></tr>)}</tbody></table>{!audit.length && <Empty>No audit records received.</Empty>}</div></Panel>
       </section>
       <footer><span><Circle size={7} fill="currentColor" /> BLACKBOX / INDEPENDENT BY DESIGN</span><span>Synthetic data only · In-memory demo · No real payments</span></footer>
     </main>
-  </div>
+  </div></DisplayContext.Provider>
 }

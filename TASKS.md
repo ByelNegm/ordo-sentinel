@@ -19,6 +19,9 @@ Owners: **Devin** = backend/lead, **UI** = colleague's Devin session. Times are 
 
 ## M2 — UI (→14:45, UI)
 Console delivered in PR #8 (ui/blackbox-console); merge pending. Live-only by design; no mock mode.
+- [x] Judge-facing names/masked IBANs, payment references/purposes and prominent incident summary
+- [x] Six-step live-state workflow strip, aligned smooth auto-scroll and pulsed next controls
+- [x] Truthful unsafe-challenge reasons/applied state; v2 duplicate and tamper UI recovery flows and screenshots
 - [x] Shell, status bar, SSE hook against the real backend
 - [x] Bank Operations · Attack Simulator
 - [x] Incident Investigation · Recovery Sandbox · Recovery Verification
