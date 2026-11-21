@@ -62,6 +62,30 @@ def test_generated_scenarios_follow_demo_clock_and_policy(monkeypatch):
     asyncio.run(run())
 
 
+def test_wire_explanation_uses_live_balance_after_normal_then_drain(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    async def run():
+        bank, bus = Bank(), EventBus()
+        runner = ScenarioRunner(bank, bus, pace=0)
+        async with bus.subscribe() as queue:
+            try:
+                runner.start("normal")
+                await runner.task
+                runner.start("drain")
+                await runner.task
+
+                [wire_alert] = [event.data for event in queued_events(queue)
+                                if event.type == "alert.created" and event.data.id == "alert_wire"]
+                assert "86.55% of the AED 519,915 balance" in wire_alert.analyst_explanation
+                assert wire_alert == bank.alerts["alert_wire"]
+            finally:
+                await runner.stop()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("choice", ["confirm", "deny"])
 def test_early_burst_decision_leaves_second_hold_actionable(monkeypatch, choice):
     async def run():
