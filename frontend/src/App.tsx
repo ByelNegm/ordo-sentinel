@@ -6,12 +6,13 @@ import { PulseIcon as Activity, ArrowDownLeftIcon as ArrowDownLeft, ArrowRightIc
   FlaskIcon as FlaskConical, StackIcon as Layers3, SpinnerGapIcon as LoaderCircle,
   LockKeyIcon as LockKeyhole, BroadcastIcon as Radio, ArrowCounterClockwiseIcon as RotateCcw,
   CubeFocusIcon as ScanLine, CheckCircleIcon as ShieldCheck, WarningCircleIcon as ShieldX,
-  TerminalWindowIcon as Terminal, WarningIcon as TriangleAlert, LightningIcon as Zap } from '@phosphor-icons/react'
+  TerminalWindowIcon as Terminal, WarningIcon as TriangleAlert, LightningIcon as Zap, XIcon as X } from '@phosphor-icons/react'
 import type { ChallengeVariant, Check as IntegrityCheck, Entry, SandboxChallenge } from './types'
 import { api, useBank } from './useBank'
 import { createDisplay } from './display'
 import { deriveWorkflow, workflowSteps } from './workflow'
 import { sandboxRunnerLabel } from './sandboxRunner'
+import { balanceMessage, isForbiddenApproval, terminalStage } from './presentation'
 
 const DisplayContext = createContext(createDisplay([], [], []))
 
@@ -35,6 +36,12 @@ function Badge({ value, children }: { value: string; children?: ReactNode }) {
 }
 function Panel({ title, note, children, className = '' }: { title: string; note?: ReactNode; children: ReactNode; className?: string }) {
   return <div className={`panel ${className}`}><div className="panel-heading"><h3>{title}</h3>{note}</div>{children}</div>
+}
+function BalanceBanner({ balanced, status, context = false }: { balanced: boolean; status: string | undefined; context?: boolean }) {
+  const message = balanceMessage(balanced, status)
+  return <div className={`balance-banner ${message.alert ? 'alert' : ''}`} data-testid={context ? 'approval-balance-banner' : 'balance-banner'}>
+    <strong>{message.heading}</strong> {message.detail}
+  </div>
 }
 function SectionTitle({ number, title, subtitle }: { number: string; title: string; subtitle: string }) {
   return <div className="section-title"><span className="section-number">{number}</span><div><h2>{title}</h2><p>{subtitle}</p></div></div>
@@ -157,8 +164,11 @@ export default function App() {
       setPending('')
     }
   }
-  const result = (key: string) => results[key] && <div className={`action-result ${results[key].error ? 'error-result' : ''}`} role={results[key].error ? 'alert' : 'status'}>
-    {results[key].error ? <TriangleAlert size={14} /> : <Check size={14} />}<span>{display.humanize(results[key].text)}</span>
+  const result = (key: string) => results[key] && <div className={`action-result ${results[key].error ? 'error-result' : ''} ${isForbiddenApproval(key, results[key]) ? 'approval-forbidden' : ''}`} role={results[key].error ? 'alert' : 'status'}>
+    {results[key].error ? <TriangleAlert size={14} /> : <Check size={14} />}{isForbiddenApproval(key, results[key]) ? <div className="forbidden-copy">
+      <strong>Agent approval blocked</strong><p>{display.humanize(results[key].text)}</p>
+      {overview && <BalanceBanner balanced={balanced === true} status={status} context />}
+    </div> : <span>{display.humanize(results[key].text)}</span>}
   </div>
   const actionButton = (key: string, title: string, path: string, style = '', disabled = false, body?: unknown) =>
     <button data-action={key} className={`button ${style}`} disabled={!!pending || disabled || !overview} onClick={() => { void act(key, path, body) }}>
@@ -201,6 +211,7 @@ export default function App() {
           <div className="metric"><span><ArrowUpRight size={16} /> Total debits</span><strong className="money">{overview ? money(overview.totals.debits_minor) : '–'}</strong><div>{overview?.totals.ledger_entries ?? '–'} append-only journal entries</div></div>
           <div className="metric"><span><ArrowDownLeft size={16} /> Total credits</span><strong className="money">{overview ? money(overview.totals.credits_minor) : '–'}</strong><div className={balanced === null ? '' : balanced ? 'accent-text' : 'red-text'}>{balanced === null ? 'Waiting for ledger' : balanced ? <><Check size={11} /> Debits equal credits</> : 'Debits and credits differ'}<b className="balanced-note">Balanced ≠ correct</b></div></div>
         </div>
+        {overview && <BalanceBanner balanced={balanced === true} status={status} />}
         <Panel title="Independent integrity checks" note={<span className="subtle">{passed ?? '–'} of 7 passing · Reconciled against intent</span>}>
           {integrity ? <Checks checks={integrity.checks} /> : <Empty>Loading independent integrity checks…</Empty>}
         </Panel>
@@ -244,7 +255,7 @@ export default function App() {
         {!incident ? <Panel title="Investigation workspace"><Empty>No incidents. Monitoring independent payment intent for integrity violations.</Empty></Panel> : <>
           <p className="incident-summary" data-testid="incident-summary">{incident.summary_text ?? 'Reconstructing the payment from independent evidence…'}</p>
           <div className="incident-header"><span className="accent-text">Settlement recovery</span><span>{label(incident.type)}</span><Badge value={incident.status}><span data-testid="incident-status">{label(incident.status)}</span></Badge><span className="subtle">Newest incident · {incidents.length} total</span></div>
-          <div className="stepper">{stages.map((stage, index) => <div key={stage} className={incident.status === stage ? 'step current' : stages.indexOf(incident.status) > index ? 'step done' : 'step'}><span>{stages.indexOf(incident.status) > index ? <Check size={13} /> : String(index + 1).padStart(2, '0')}</span><b>{label(stage)}</b></div>)}</div>
+          <div className="stepper">{stages.map((stage, index) => <div key={stage} className={incident.status === stage ? 'step current' : stages.indexOf(incident.status) > index ? 'step done' : 'step'}><span>{stages.indexOf(incident.status) > index ? <Check size={13} /> : String(index + 1).padStart(2, '0')}</span><b>{label(stage)}</b></div>)}{terminalStage(incident.status) && <div className="step terminal" data-testid="terminal-step"><span><X size={14} /></span><b>{terminalStage(incident.status)}</b></div>}</div>
           <div className="investigation-grid">
             <Panel title="Root cause" note={<span className="method">{incident.root_cause.method === 'deterministic' ? 'Deterministic' : incident.root_cause.method}</span>}>
               <div className="root-cause"><div className="root-service"><Terminal size={18} /><strong>{incident.root_cause.service}</strong><span>{incident.root_cause.confidence} confidence</span></div><p>{display.humanize(incident.root_cause.summary)}</p><div className="impact"><span>Financial impact</span><strong>{money(incident.impact_minor)}</strong><small>{incident.affected_payments.length} affected payment{incident.affected_payments.length === 1 ? '' : 's'} · {incident.affected_accounts.map(display.accountName).join(', ')}</small></div></div>
