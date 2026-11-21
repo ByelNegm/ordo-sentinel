@@ -4,6 +4,7 @@ from copy import deepcopy
 
 from .bank import Bank, money_text
 from .bus import EventBus
+from .daytona_runner import DaytonaValidator
 from .integrity import (extra_postings, inspect, intent_lines, restored_instructions,
                         tampered_postings)
 from .ledger import reversed_lines
@@ -26,12 +27,14 @@ class ActionError(Exception):
 
 class IncidentCoordinator:
     def __init__(self, bank: Bank, settlement: SettlementService, bus: EventBus,
-                 lock: asyncio.Lock, step_delay: float = 1.0) -> None:
+                 lock: asyncio.Lock, step_delay: float = 1.0,
+                 validator: DaytonaValidator | None = None) -> None:
         self.bank, self.settlement, self.bus = bank, settlement, bus
         self.lock, self.step_delay = lock, step_delay
         self.incidents: dict[str, Incident] = {}
         self.audit: list[AuditRecord] = []
         self.tasks: set[asyncio.Task] = set()
+        self.validator = validator
 
     def record(self, actor: str, action: str, ref: str | None, detail: str) -> AuditAppended:
         record = AuditRecord(id=f"audit-{len(self.audit) + 1:06}", ts=utcnow(),
@@ -379,6 +382,19 @@ class IncidentCoordinator:
             await asyncio.sleep(self.step_delay)
             async with self.lock:
                 incident.sandbox = self.sandbox(incident)
+                payload = self.validation_payload(incident) if self.validator else None
+            if self.validator:
+                validated = await self.validator.validate(payload, incident.sandbox)
+            else:
+                validated = incident.sandbox
+            async with self.lock:
+                incident.sandbox = validated
+                if validated.runner == "daytona":
+                    detail = f"Validated in Daytona sandbox {validated.runner_id}"
+                    incident.timeline.append(TimelineItem(
+                        ts=utcnow(), kind="sandbox", ref=validated.runner_id, detail=detail))
+                    await self.bus.publish(self.record(AGENT, "sandbox.daytona.validated",
+                                                       identifier, detail))
                 incident.timeline.append(TimelineItem(ts=utcnow(), kind="sandbox", ref=incident.proposal.id,
                                                        detail=f"Sandbox passed: {incident.sandbox.passed}"))
                 await self._change(incident, "awaiting_approval" if incident.sandbox.passed else "failed",
@@ -389,6 +405,16 @@ class IncidentCoordinator:
             async with self.lock:
                 incident = self.get(identifier)
                 await self._change(incident, "failed", "incident.failed", str(error))
+
+    def validation_payload(self, incident: Incident) -> dict:
+        return {
+            "accounts": sorted(self.bank.ledger.accounts),
+            "entries": [entry.model_dump(mode="json") for entry in self.bank.ledger.entries],
+            "instructions": [item.model_dump(mode="json") for item in self.bank.instructions.values()],
+            "events": [event.model_dump(mode="json") for event in self.bank.events],
+            "proposal": incident.proposal.model_dump(mode="json"),
+            "expected_proposal": self.propose(incident).model_dump(mode="json"),
+        }
 
     async def approve(self, identifier: str, actor: str) -> Incident:
         """Caller holds the runtime lock across validation and the atomic append batch."""
@@ -402,7 +428,11 @@ class IncidentCoordinator:
         if incident.status != "awaiting_approval":
             await self.bus.publish(self.record(actor, "approval.conflict", identifier, incident.status))
             raise ActionError(409, "Incident is not awaiting approval")
+        confirmation = incident.sandbox
         incident.sandbox = self.sandbox(incident)
+        if confirmation is not None and incident.sandbox.passed:
+            for field in ("runner", "runner_id", "remote_match", "runner_note"):
+                setattr(incident.sandbox, field, getattr(confirmation, field))
         if not incident.sandbox.passed:
             await self._change(incident, "failed", "approval.invalid", "Proposal failed sandbox revalidation")
             raise ActionError(409, "Proposal failed sandbox revalidation")

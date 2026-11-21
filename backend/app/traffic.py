@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 
 from .bank import Bank
 from .bus import EventBus
+from .daytona_runner import DaytonaValidator
 from .incident import ActionError, IncidentCoordinator, OPEN_STATUSES
 from .models import (FaultResponse, IncidentUpdated, IntegritySummary, Overview,
                      PaymentAccepted, Reset, ServiceUpdated, Totals, Volume, utcnow)
@@ -45,6 +46,7 @@ class Runtime:
         self.step_delay = step_delay
         self.missing_grace = missing_grace
         self.missing_task: asyncio.Task | None = None
+        self.validator = DaytonaValidator()
         self.traffic = Traffic(self.submit_payment, traffic_interval)
         self._seed()
 
@@ -53,7 +55,7 @@ class Runtime:
         self.settlement = SettlementService(self.bank, self.missing_grace)
         self.bank.seed(self.settlement)
         self.coordinator = IncidentCoordinator(self.bank, self.settlement, self.bus,
-                                               self.lock, self.step_delay)
+                                               self.lock, self.step_delay, self.validator)
         self.coordinator.record("system", "bank.seeded", None, "100 payments settled through normal processing")
 
     def overview(self) -> Overview:
@@ -195,3 +197,4 @@ class Runtime:
             await self.traffic.stop()
             await self._stop_missing()
             await self.coordinator.stop()
+        await self.validator.close()
