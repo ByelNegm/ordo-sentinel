@@ -145,6 +145,10 @@ class Runtime:
 
     async def inject(self, kind: str) -> FaultResponse:
         async with self.lock:
+            if self.coordinator.report().status != "healthy":
+                detail = "Integrity violated by an unrecovered incident; reset required"
+                await self.bus.publish(self.coordinator.record("operator", "fault.conflict", kind, detail))
+                raise ActionError(409, detail)
             try:
                 self.settlement.inject(kind)
             except ValueError as error:

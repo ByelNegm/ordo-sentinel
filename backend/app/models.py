@@ -129,6 +129,17 @@ class SandboxReport(Model):
     ts: datetime
 
 
+class SandboxChallengeRequest(Model):
+    variant: Literal["wrong_amount", "reverse_original"]
+
+
+class SandboxChallengeResponse(Model):
+    variant: Literal["wrong_amount", "reverse_original"]
+    proposal: Proposal
+    sandbox: SandboxReport
+    ledger_unchanged: bool
+
+
 class Approval(Model):
     actor: str
     at: datetime

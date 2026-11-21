@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from .incident import ActionError
 from .models import (ActorRequest, AuditRecord, FaultResponse, Incident, IntegrityReport,
-                     JournalEntry, Overview, PaymentInstruction, Service, SettlementEvent,
+                     JournalEntry, Overview, PaymentInstruction, SandboxChallengeRequest,
+                     SandboxChallengeResponse, Service, SettlementEvent,
                      TrafficStatus)
 from .traffic import Runtime
 
@@ -100,6 +101,11 @@ def create_app(*, traffic_interval: float = 1.5, step_delay: float = 1.0,
     async def reject(identifier: str, body: ActorRequest):
         async with runtime.lock:
             return await runtime.coordinator.reject(identifier, body.actor)
+
+    @app.post("/api/incidents/{identifier}/sandbox/challenge", response_model=SandboxChallengeResponse)
+    async def sandbox_challenge(identifier: str, body: SandboxChallengeRequest):
+        async with runtime.lock:
+            return await runtime.coordinator.challenge(identifier, body.variant)
 
     @app.post("/api/services/settlement-svc/release", response_model=Service)
     async def release():
