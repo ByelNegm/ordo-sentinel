@@ -1,6 +1,6 @@
 # BLACKBOX — 5-Minute Demo Script
 
-Track: **Protect the Big Guy — Code, Data & Infrastructure Rails**. Field names come from [API_CONTRACT.md](API_CONTRACT.md) and UI controls from [FRONTEND_BRIEF.md](FRONTEND_BRIEF.md). The numbers come from verified runs (backend commit `f13b2e4`). Amounts that depend on timing are read off the screen, not memorized.
+Track: **Protect the Big Guy — Code, Data & Infrastructure Rails**. Field names come from [API_CONTRACT.md](API_CONTRACT.md) and UI controls from [FRONTEND_BRIEF.md](FRONTEND_BRIEF.md). The numbers come from verified runs. Amounts that depend on timing are read off the screen, not memorized.
 
 ## Pre-flight (T-5 min)
 - Backend: `cd backend && uvicorn app.main:app --port 8000`. Frontend: `cd frontend && npm run dev`, open `http://localhost:5173`. Confirm that mock mode is **off**.
@@ -29,14 +29,14 @@ Track: **Protect the Big Guy — Code, Data & Infrastructure Rails**. Field name
 - **Say:** "Debits still equal credits. A traditional control says this bank is fine. It isn't: a customer has been charged twice. BLACKBOX doesn't trust the ledger to check itself. It independently replays every payment instruction, derives what the ledger *should* contain, and compares. Balanced is not the same as correct, and that's the gap this product closes."
 
 ## 2:00–2:45 · Autonomous investigation + quarantine
-- **Click:** sidebar → **Incident Investigation**. No clicks are needed: it auto-focuses the newest incident and the stepper advances by itself.
+- **Click:** sidebar → **Incident Investigation**. No clicks are needed: it auto-focuses the newest incident and the stepper advances by itself. In measured runs, inject → `awaiting_approval` took 5.3–5.7s.
 - **Screen:** the stepper goes `detected → investigating → contained`. The root cause card shows `service: settlement-svc`, `summary`, `confidence`, and a method badge reading **Deterministic**. `impact_minor` is shown large (the duplicated amount shown on screen; it varies by timing, e.g. AED 344.48 in a rehearsal run), with `affected_payments`, `affected_accounts`, and the lineage tree (instruction → 2 event_ids → 2 entry_ids). The evidence `timeline` and the containment card (`action: quarantine`, `held_instructions`, the payments that arrived during quarantine) appear. The status bar shows **settlement-svc quarantined**, and new payments arrive as `held`.
 - **Say:** "Nobody touched anything. Within seconds BLACKBOX traced the lineage from instruction to events to postings, built a timeline, and pinned the root cause on settlement-svc. Note the badge: this was found by deterministic analysis, not an LLM guess. Then it contained the blast radius: the service is quarantined, and new payments are safely held instead of being double-charged."
 
-## 2:45–3:45 · Recovery proposal, sandbox, 403, human approval
-- **Click:** sidebar → **Recovery Sandbox**. Approver select → **blackbox-agent** → **Approve recovery**. Then approver select → **ops.lead@bank** → **Approve recovery**. (**Reject proposal** exists but isn't used in the demo.)
-- **Screen:** the incident is in `awaiting_approval`. It shows the `proposal.description` and a compensating `entries` table, `balances_before` vs `balances_after` with only the changed accounts highlighted, and `checks_before` (red) vs `checks_after` (7/7 green) side by side, under a **Sandbox PASSED** banner (`sandbox.passed: true`). Approving as `blackbox-agent` shows a visible **403** inline. Approving as `ops.lead@bank` moves the stepper to `correcting`.
-- **Say:** "BLACKBOX proposes a fix: compensating entries, not deletions. Before anyone sees it, the fix is applied to an isolated copy of the bank, and all seven checks pass there. Now, can the AI approve its own fix? (click) 403. No. The agent is structurally barred from moving money. Only an authorized human can do it. The ops lead approves."
+## 2:45–3:45 · Recovery proposal, sandbox, unsafe-fix rejection, 403, human approval
+- **Click:** sidebar → **Recovery Sandbox**. In the **Attempt unsafe correction** card → **Wrong amount (+100 minor)** (about 15s). Then approver select → **blackbox-agent** → **Approve recovery**. Then approver select → **ops.lead@bank** → **Approve recovery**. (**Reject proposal** exists but isn't used in the demo.)
+- **Screen:** the incident is in `awaiting_approval`. It shows the `proposal.description` and a compensating `entries` table, `balances_before` vs `balances_after` with only the changed accounts highlighted, and `checks_before` (red) vs `checks_after` (7/7 green) side by side, under a **SANDBOX PASSED** banner (`sandbox.passed: true`). The unsafe attempt shows a red **SANDBOX REJECTED** card naming the failing checks (Single Financial Effect, Ledger Matches Expected) and "Real ledger unchanged: N entries before = N after"; the agent's own proposal still shows **SANDBOX PASSED**. Approving as `blackbox-agent` shows a visible **403** inline. Approving as `ops.lead@bank` moves the stepper to `correcting`.
+- **Say:** "BLACKBOX proposes a fix: compensating entries, not deletions. Before anyone sees it, the fix is applied to an isolated copy of the bank, and all seven checks pass there. What if someone pushes a bad fix? (click) Off by one dirham: rejected. Two checks fail, and the real ledger wasn't touched. The sandbox is a real gate, not a rubber stamp. Now, can the AI approve its own fix? (click) 403. No. The agent is structurally barred from moving money. Only an authorized human can do it. The ops lead approves."
 
 ## 3:45–4:30 · Compensating correction, 7/7, INTEGRITY RESTORED
 - **Click:** sidebar → **Recovery Verification**. Then **Release settlement-svc**.
@@ -45,8 +45,8 @@ Track: **Protect the Big Guy — Code, Data & Infrastructure Rails**. Field name
 
 ## 4:30–5:00 · Built with Devin
 - **Click:** switch to the repo / [DEVIN_USAGE.md](DEVIN_USAGE.md) and the PR list (https://github.com/ByelNegm/ordo-sentinel/pulls).
-- **Screen:** the PR list, review comments, backend [PR #7](https://github.com/ByelNegm/ordo-sentinel/pull/7), UI [PR #8](https://github.com/ByelNegm/ordo-sentinel/pull/8), and the test output: **51 passed**.
-- **Say:** "We built this with Devin as an engineering team: a lead session orchestrating parallel builder sessions per module, an independent review gate that never wrote the code it reviewed, and a frozen API contract that let a colleague's Devin build this UI in parallel. The review gate and Devin Review caught real bugs before merge. We even pivoted products mid-hackathon without rewriting git history. 51 backend tests pass, and all three fault types (duplicate, missing, tampered) recover end to end. BLACKBOX: balanced isn't correct, and AI never moves the money."
+- **Screen:** the PR list, review comments, backend [PR #7](https://github.com/ByelNegm/ordo-sentinel/pull/7), UI [PR #8](https://github.com/ByelNegm/ordo-sentinel/pull/8), and the test output: **59 passed**.
+- **Say:** "We built this with Devin as an engineering team: a lead session orchestrating parallel builder sessions per module, an independent review gate that never wrote the code it reviewed, and a frozen API contract that let a colleague's Devin build this UI in parallel. The review gate and Devin Review caught real bugs before merge. We even pivoted products mid-hackathon without rewriting git history. 59 backend tests pass, the full cycle runs in about 8 seconds, and all three fault types (duplicate, missing, tampered) recover end to end. BLACKBOX: balanced isn't correct, and AI never moves the money."
 
 ---
 
@@ -66,6 +66,8 @@ sleep 5
 ID=$(curl -s $B/api/incidents | jq -r '.[0].id')
 curl -s $B/api/incidents/$ID | jq '{status, root_cause, impact_minor, containment, lineage}'
 curl -s $B/api/incidents/$ID | jq '{proposal: .proposal.description, sandbox_passed: .sandbox.passed}'
+curl -s -X POST $B/api/incidents/$ID/sandbox/challenge \
+  -H 'Content-Type: application/json' -d '{"variant":"wrong_amount"}' | jq .   # rejected; real ledger unchanged
 curl -s -w '\nHTTP %{http_code}\n' -X POST $B/api/incidents/$ID/approve \
   -H 'Content-Type: application/json' -d '{"actor":"blackbox-agent"}'    # HTTP 403
 curl -s -X POST $B/api/incidents/$ID/approve \
@@ -86,5 +88,6 @@ If the backend itself fails, play the pre-recorded run video and narrate over it
 - Run Reset between rehearsals. Rehearse the full flow 3 times in a row without reloading the page.
 - Only **ops.lead@bank** and **treasury@bank** can approve; **blackbox-agent** always gets 403.
 - If you demo **Inject Missing Settlement** (optional, time permitting): detection waits for a **3-second grace window** before flagging the payment as missing. Say "we give settlement 3 seconds before calling it missing" so the pause doesn't look like a hang. Use `sleep 5` instead of `sleep 3` in the curl backup.
+- Measured UI timings (5 consecutive runs, one page, no reload, all PASS): duplicate inject → `awaiting_approval` 5.3–5.7s, full cycle about 8s; missing 8.9s / 11.6s; tamper 5.9s / 8.4s.
 - If an incident gets stuck before `awaiting_approval`, check `GET /api/incidents/{id}` → `status`. Fall back to curl and keep talking.
 - Don't say "AI detected": the detection is deterministic. AI (if shown) only explains, and is labeled.

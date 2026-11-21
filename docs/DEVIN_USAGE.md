@@ -20,6 +20,7 @@ BLACKBOX was built in a single hackathon day by a small team using Devin as an e
 - A separate **review-gate Devin session**, which never wrote any of the code, reviewed each deliverable against GOAL.md and the contract before merge. It checked the code for contract drift, invented metrics, hidden fake states, and claims not backed by test output.
 - **Devin Review** ran on the PRs as an additional automated reviewer; its comments were fixed or answered on the PR.
 - **Real catches:** the gate PASSED P0 and raised one P2 MUST_FIX (a fault could be injected after a rejected incident). Devin Review found 3 bugs on PR #7. All were resolved by the same fix, a 409 gate in commit `f13b2e4`.
+- **Review-driven feature, the sandbox challenge:** the judging criteria call for a visible rejection, so the review identified that showing only a passing sandbox was not enough proof. The lead built `POST /api/incidents/{id}/sandbox/challenge` (variants: wrong amount +100 minor, reverse original) and the UI's **Attempt unsafe correction** card, which shows a red SANDBOX REJECTED with the failing checks while the real ledger is unchanged. The independent reviewer gated it before merge.
 - The rule: a builder can't mark its own work done; only the gate and the lead's integration run can.
 
 ## 3. Anti-drift files
@@ -46,9 +47,11 @@ This kept the concurrent sessions aligned without a human relaying context betwe
 ## 6. Test and verification evidence
 | Item | Result |
 |---|---|
-| Backend pytest (`cd backend && pytest -q`, commit `f13b2e4`) | 51 passed |
+| Backend pytest (`cd backend && pytest -q`) | 59 passed |
 | Live curl flows: duplicate, missing, tamper | All 3 passed: reset → detection → sandbox → agent 403 → approval → idempotent repeat → 7/7 → release (1 held payment released) |
 | UI acceptance (Playwright, live backend) | Full duplicate flow passed through the console |
+| UI timing, 5 consecutive runs in one page with no reload | All PASS. Duplicate inject → awaiting_approval 5.3–5.7s, full cycle about 8s; missing 8.9s / 11.6s; tamper 5.9s / 8.4s |
+| Sandbox challenge | An unsafe fix is rejected with the failing checks named; real ledger entry count unchanged; approving the agent's proposal afterwards restores 7/7 |
 | Review gate | P0 PASSED; P2 MUST_FIX fixed (409 gate, `f13b2e4`) |
 | Devin Review on PR #7 | 3 bugs found, all resolved |
 
