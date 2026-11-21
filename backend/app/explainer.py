@@ -1,10 +1,11 @@
 """Builder C: EN/AR customer messages and analyst narratives for hold/freeze alerts.
 
-Deterministic templates are the default and always succeed instantly. If
-OPENAI_API_KEY or ANTHROPIC_API_KEY is set, an LLM may *rewrite* the template
-text (never decide anything); any error, timeout or invalid reply silently
-falls back to the templates. Results are cached in memory by alert content.
+`explain` is synchronous and template-only (no network), so it never delays
+enforcement. `enrich` is an optional async LLM rewrite (OPENAI_API_KEY or
+ANTHROPIC_API_KEY) capped at 1s total, cached by alert content, returning None
+on any problem. The LLM only rewrites text; it never decides anything.
 """
+import asyncio
 import hashlib
 import json
 import os
@@ -16,7 +17,7 @@ import httpx
 from .models import Alert, CustomerMessage, Explanation, Txn
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
-LLM_TIMEOUT = float(os.getenv("ORDO_LLM_TIMEOUT", "3"))
+LLM_TIMEOUT = float(os.getenv("ORDO_LLM_TIMEOUT", "1"))
 _CACHE: dict[str, Explanation] = {}
 _AR_DIGITS = str.maketrans("0123456789,.", "٠١٢٣٤٥٦٧٨٩٬٫")
 
@@ -92,22 +93,23 @@ def _customer(txns: list[Txn]) -> CustomerMessage:
         what_en = f"{n} unusual{' overnight' if night else ''} {kind_en}payments totaling {amt_en}"
         what_ar = (f"{_ar_payments(n)}{' إلى الخارج' if overseas else ''}{' ليلاً' if night else ''} بقيمة إجمالية {amt_ar}")
     src_en = " from a connected service you haven't used before" if new_client else ""
-    src_ar = " من خدمة متصلة لم تستخدمها من قبل" if new_client else ""
+    src_ar = " من خدمة متصلة لم تستخدميها من قبل" if new_client else ""
     it_en, them_ar = ("it", "ها") if n == 1 else ("them", "هما" if n == 2 else "ها")
     was_en = "this was" if n == 1 else "these were"
 
     if freeze:
         en = (f"We blocked {what_en}{src_en}. Your money has not left your account, "
               f"and we have paused that service's access. If {was_en} not you, tap Deny. "
-              f"If it was you, tap Confirm. Never share your verification codes with anyone.")
+              f"If you made {it_en}, contact us to verify {it_en}; nothing will be sent automatically. "
+              f"Never share your verification codes with anyone.")
         ar = (f"حظرنا {what_ar}{src_ar}. لم تغادر أموالك حسابك، وأوقفنا وصول هذه الخدمة مؤقتاً. "
-              f"إذا لم تكن أنت من أجرا{them_ar} فاضغط «رفض»، وإن كنت أنت فاضغط «تأكيد». "
-              f"لا تشارك رموز التحقق مع أي شخص.")
+              f"إذا لم تكوني أنتِ من أجرا{them_ar} فاضغطي «رفض». وإن كنتِ أنتِ، فتواصلي معنا للتحقق؛ "
+              f"لن يُرسَل أي مبلغ تلقائياً. لا تشاركي رموز التحقق مع أي شخص.")
     else:
         en = (f"We paused {what_en}{src_en}. Your money has not left your account. "
               f"If {was_en} you, tap Confirm. If not, tap Deny and we will cancel {it_en}.")
         ar = (f"أوقفنا مؤقتاً {what_ar}{src_ar}. لم تغادر أموالك حسابك. "
-              f"إذا كنت أنت من أجرا{them_ar} فاضغط «تأكيد»، وإن لم تكن أنت فاضغط «رفض» وسنلغي{them_ar}.")
+              f"إذا كنتِ أنتِ من أجرا{them_ar} فاضغطي «تأكيد»، وإن لم تكوني أنتِ فاضغطي «رفض» وسنلغي{them_ar}.")
     return CustomerMessage(en=en, ar=ar)
 
 
@@ -144,12 +146,12 @@ def template_explanation(alert: Alert, txns: list[Txn] | None = None,
                          balance: float | None = None) -> Explanation:
     """Instant deterministic EN/AR + analyst text; never raises."""
     try:
-        if txns is None:
-            known = _fixture_txns()
-            txns = [known[i] for i in alert.txn_ids if i in known]
-        txns = [t for t in txns if t.id in alert.txn_ids] or txns
-        if not txns:
-            raise ValueError("no transactions")
+        given = {t.id: t for t in txns or []}
+        if not all(i in given for i in alert.txn_ids):
+            given = {**_fixture_txns(), **given}
+        if not alert.txn_ids or not all(i in given for i in alert.txn_ids):
+            raise ValueError("missing alert transactions")
+        txns = [given[i] for i in alert.txn_ids]
         if balance is None:
             balance = _fixture_balance()
         return Explanation(customer_message=_customer(txns), analyst_explanation=_analyst(txns, balance))
@@ -214,22 +216,41 @@ def _cache_key(alert: Alert, base: Explanation) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-async def explain(alert: Alert, txns: list[Txn] | None = None,
-                  balance: float | None = None) -> Explanation:
-    """Return EN/AR customer text and analyst narrative; always succeeds.
+class _Explained(Explanation):
+    """Explanation that can also be awaited, so legacy `await explain(...)` callers keep working."""
 
-    txns/balance are optional context (defaults: fixture transactions by alert.txn_ids
-    and fixture balance). The LLM, if configured, only rewrites the template text.
+    def __await__(self):
+        if False:
+            yield
+        return Explanation.model_validate(self.model_dump())
+
+
+def explain(alert: Alert, txns: list[Txn] | None = None,
+            balance: float | None = None) -> Explanation:
+    """Synchronous, template-only, no network: safe on the enforcement path.
+
+    txns/balance are optional live context (defaults: fixture transactions by
+    alert.txn_ids and fixture balance).
     """
-    base = template_explanation(alert, txns, balance)
+    return _Explained.model_validate(template_explanation(alert, txns, balance).model_dump())
+
+
+async def enrich(alert: Alert, txns: list[Txn] | None = None,
+                 balance: float | None = None) -> Explanation | None:
+    """Optional LLM rewrite of the template text, capped at LLM_TIMEOUT seconds total.
+
+    Returns None when no key is set or on any error/timeout. Cached by alert content.
+    Intended to run as a background task; the LLM never decides anything.
+    """
     if _provider() is None:
-        return base
+        return None
+    base = template_explanation(alert, txns, balance)
     key = _cache_key(alert, base)
     if key in _CACHE:
         return _CACHE[key].model_copy(deep=True)
     try:
-        result = await _llm_rewrite(base)
+        result = await asyncio.wait_for(_llm_rewrite(base), LLM_TIMEOUT)
     except Exception:
-        return base
+        return None
     _CACHE[key] = result
     return result.model_copy(deep=True)
