@@ -9,7 +9,7 @@ from app.integrity import event_integrity, inspect
 from app.models import PostingLine, utcnow
 from app.settlement import SettlementService
 from app.traffic import Runtime
-from conftest import awaiting_incident, wait_for
+from conftest import awaiting_incident, duplicate_via_http, wait_for
 
 
 async def ready(runtime, kind):
@@ -176,7 +176,7 @@ def test_missing_watchdog_detects_without_traffic_and_reset_cancels_it():
     asyncio.run(run())
 
 
-def test_reject_release_and_later_fault_opens_new_incident():
+def test_reject_release_requires_reset_before_a_new_fault():
     async def run():
         runtime = Runtime(step_delay=0, missing_grace=0)
         try:
@@ -188,12 +188,86 @@ def test_reject_release_and_later_fault_opens_new_incident():
             await runtime.release()
             assert runtime.settlement.service.status == "running"
             assert runtime.overview().volume.held == runtime.overview().open_incidents == 0
+            with pytest.raises(ActionError) as error:
+                await runtime.inject("duplicate")
+            assert error.value.status == 409
+            await runtime.reset()
             runtime.coordinator.step_delay = 10
             await runtime.inject("duplicate")
             await runtime.submit_payment()
-            second = runtime.coordinator.incidents["incident-0002"]
+            second = runtime.coordinator.incidents["incident-0001"]
             assert second.status == "detected" and first.status == "rejected"
-            assert set(first.affected_payments).isdisjoint(second.affected_payments)
+            assert second is not first
+        finally:
+            await runtime.stop()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind", ["duplicate", "missing", "tamper"])
+def test_http_rejected_unrecovered_incident_blocks_new_fault_until_reset(client, kind):
+    incident = duplicate_via_http(client)
+    path = "/api/incidents/" + incident["id"]
+    assert client.post(path + "/reject", json={"actor": "ops.lead@bank"}).status_code == 200
+    assert client.post("/api/services/settlement-svc/release").status_code == 200
+    assert client.get("/api/integrity").json()["status"] == "violated"
+    before = client.get("/api/ledger?limit=500").json()
+    response = client.post("/api/faults/" + kind)
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Integrity violated by an unrecovered incident; reset required"}
+    assert client.get("/api/overview").json()["services"][0]["fault"] is None
+    assert client.get("/api/ledger?limit=500").json() == before
+    assert len(client.get("/api/incidents").json()) == 1
+    assert client.get("/api/audit?limit=1").json()[0]["action"] == "fault.conflict"
+    assert client.post("/api/reset").status_code == 200
+    assert client.post("/api/faults/" + kind).status_code == 200
+
+
+def test_gate_blocks_tamper_before_duplicate_quarantine():
+    async def run():
+        runtime = Runtime(step_delay=0, missing_grace=0)
+        try:
+            await runtime.inject("duplicate")
+            await runtime.submit_payment()
+            incident = next(iter(runtime.coordinator.incidents.values()))
+            affected = incident.affected_payments[:]
+            assert incident.status == "detected"
+            assert runtime.settlement.service.status == "running"
+            with pytest.raises(ActionError) as error:
+                await runtime.inject("tamper")
+            assert error.value.status == 409
+            assert error.value.detail == "Integrity violated by an unrecovered incident; reset required"
+            assert runtime.settlement.service.fault is None
+            await asyncio.gather(*tuple(runtime.coordinator.tasks))
+            assert incident.affected_payments == affected
+            assert incident.type == "duplicate_settlement"
+            assert incident.status == "awaiting_approval" and incident.sandbox.passed
+        finally:
+            await runtime.stop()
+    asyncio.run(run())
+
+
+def test_gate_blocks_missing_before_quarantine_and_release_settles_held():
+    async def run():
+        runtime = Runtime(step_delay=0, missing_grace=10)
+        try:
+            await runtime.inject("duplicate")
+            await runtime.submit_payment()
+            assert runtime.settlement.service.status == "running"
+            with pytest.raises(ActionError) as error:
+                await runtime.inject("missing")
+            assert error.value.status == 409
+            assert runtime.settlement.service.fault is None
+            await asyncio.gather(*tuple(runtime.coordinator.tasks))
+            incident = next(iter(runtime.coordinator.incidents.values()))
+            await runtime.submit_payment()
+            held_id = runtime.settlement.queue[0]
+            async with runtime.lock:
+                await runtime.coordinator.approve(incident.id, "ops.lead@bank")
+            await runtime.release()
+            held = runtime.bank.instructions[held_id]
+            assert held.status == "settled" and held.settlement_count == 1
+            assert not runtime.settlement.pending_missing and runtime.missing_task is None
+            assert runtime.coordinator.report().status == "healthy"
         finally:
             await runtime.stop()
     asyncio.run(run())
