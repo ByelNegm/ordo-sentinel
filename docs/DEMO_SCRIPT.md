@@ -1,0 +1,97 @@
+# BLACKBOX — 5-Minute Demo Script
+
+Track: **Protect the Big Guy — Code, Data & Infrastructure Rails**. Field names come from [API_CONTRACT.md](API_CONTRACT.md) and UI controls from [FRONTEND_BRIEF.md](FRONTEND_BRIEF.md). The numbers come from verified runs. Amounts that depend on timing are read off the screen, not memorized.
+
+## Pre-flight (T-5 min)
+- Backend: `cd backend && uvicorn app.main:app --port 8000`. Frontend: `cd frontend && npm run dev`, open `http://localhost:5173`. Confirm that mock mode is **off**.
+- Attack Simulator → **Reset to healthy baseline**. The status bar must read **HEALTHY · 7/7 · settlement-svc running · 0 open incidents · traffic off**.
+- **Presenter shortcut:** the six-step guide strip under the status bar (Healthy bank / Inject fault / Detected & contained / Sandbox validated / Approved & corrected / Verified) has one next-action button (e.g. "Review the evidence", "Review & approve recovery") and auto-scrolls to the matching section. If you lose your place, just follow the strip.
+- Open the Graphify graph [`docs/graphify/graphify-out/graph.html`](https://github.com/ByelNegm/ordo-sentinel/blob/docs/graphify/docs/graphify/graphify-out/graph.html) ([PR #9](https://github.com/ByelNegm/ordo-sentinel/pull/9), branch `docs/graphify`) locally in a browser tab, with the `.approve()` node already selected, for the closing segment.
+- Have a second terminal open with the [backup curl commands](#backup-plan-ui-fails) ready. Set the browser zoom so the status bar is readable from the back of the room.
+
+## 60-second pitch opener (spoken before the clock starts, or as 0:00–0:30 when time is tight)
+> "Every bank has a dashboard that says debits equal credits. That dashboard can be green while the bank is wrong. A settlement service retries, posts the same payment twice, and each posting balances perfectly. Nobody notices until a customer or a regulator does.
+> BLACKBOX is an autonomous incident responder for the rails underneath the bank: code, data and infrastructure. It reconciles the ledger against what *should* have happened, reconstructs exactly what went wrong, quarantines the faulty service, proves a fix in a sandbox, and waits for a human. It never rewrites history, and AI never moves money. Deterministic code decides; people approve. Let me break a bank for you."
+
+---
+
+## 0:00–0:30 · Healthy bank
+- **Click:** sidebar → **Bank Operations**. Attack Simulator → **Start traffic** (then return to Bank Operations).
+- **Screen:** status bar **HEALTHY**, 7/7 checks; the guide strip is on **Healthy bank**. Accounts show realistic names with masked IBANs (AE.. 0332 •••• ....): customers such as Al Noor Trading LLC and Fatima Al Mansoori, plus internal UAEFTS Settlement Clearing and Central Treasury – Liquidity Pool. The live payments table is filling with FT26325… references and purpose codes (SAL, SUP, RNT, UTL, INV), `debtor → creditor`, amount, `status: settled`, `settlement_count` = 1. Ledger totals `debits_minor` = `credits_minor`. `volume.instructions` and `volume.settled` are counting up from the 100 seeded payments. All 7 integrity chips are green.
+- **Say:** "This is a synthetic UAE bank: 12 accounts, corporates, individuals and internal clearing, and 100 seeded payments (salaries, suppliers, rent, utilities), with live traffic arriving every second and a half. Instructions, settlement events and the ledger are kept separately, and the ledger is double-entry and append-only. Seven independent integrity checks are all green."
+
+## 0:30–1:15 · Inject duplicate settlement
+- **Click:** sidebar → **Attack Simulator** → **Inject Duplicate Settlement**.
+- **Screen:** an inline response `{ "fault": "duplicate", "service": "settlement-svc" }`. Service `fault: "duplicate"` is shown here only. The guide strip moves to **Inject fault**. Back in **Bank Operations**, the next live payment shows a red **×2** badge (`settlement_count: 2`), and two settlement events with the same `instruction_id` appear in the event feed.
+- **Say:** "This isn't a fake alert. I'm injecting a real retry bug into the settlement service, and the next payment will be settled twice. There it is: a supplier payment of AED X from <debtor> to <creditor> (read off the screen). One instruction, two settlement events, two ledger postings. Watch the totals."
+
+## 1:15–2:00 · Detected discrepancy (the key insight)
+- **Click:** stay on **Bank Operations**, and point at the headline, the ledger totals, then the integrity chips.
+- **Screen:** `debits_minor` **still equals** `credits_minor`, yet the status bar flips to **VIOLATED** and the headline reads **"Balanced. But not correct."** `ledger_balanced` stays **green**; `single_financial_effect` and `ledger_matches_expected` turn **red**.
+- **Say:** "Debits still equal credits. A traditional control says this bank is fine. It isn't: a customer has been charged twice. BLACKBOX doesn't trust the ledger to check itself. It independently replays every payment instruction, derives what the ledger *should* contain, and compares. Balanced is not the same as correct, and that's the gap this product closes."
+
+## 2:00–2:45 · Autonomous investigation + quarantine
+- **Click:** the guide strip's **Review the evidence** button (or sidebar → **Incident Investigation**). No other clicks are needed: it auto-focuses the newest incident and the stepper advances by itself. With Daytona, inject → `awaiting_approval` takes about 7s.
+- **Screen:** a plain-English incident summary sits at the top. The stepper goes `detected → investigating → contained`, and the guide strip reaches **Detected & contained**. The root cause card shows `service: settlement-svc`, `summary`, `confidence`, and a method badge reading **Deterministic**. `impact_minor` is shown large (the duplicated amount shown on screen; it varies per run), with `affected_payments`, `affected_accounts`, and the lineage tree (instruction → 2 event_ids → 2 entry_ids). The evidence `timeline` and the containment card (`action: quarantine`, `held_instructions`, the payments that arrived during quarantine) appear. The status bar shows **settlement-svc quarantined**, and new payments arrive as `held`.
+- **Say:** "Nobody touched anything. Read the summary: the AED X supplier payment from <debtor> to <creditor> was settled twice. Within seconds BLACKBOX traced the lineage from instruction to events to postings, built a timeline, and pinned the root cause on settlement-svc. Note the badge: this was found by deterministic analysis, not an LLM guess. Then it contained the blast radius: the service is quarantined, and new payments are safely held instead of being double-charged."
+
+## 2:45–3:45 · Recovery proposal, sandbox, unsafe-fix rejection, 403, human approval
+- **Click:** the guide strip's **Review & approve recovery** button (or sidebar → **Recovery Sandbox**). In the **Attempt unsafe correction** card → **Reverse original** (about 15s). Then approver select → **blackbox-agent** → **Approve recovery**. Then approver select → **ops.lead@bank** → **Approve recovery**. (**Reject proposal** exists but isn't used in the demo.)
+- **Screen:** the incident is in `awaiting_approval`. It shows the `proposal.description` and a compensating `entries` table, `balances_before` vs `balances_after` with only the changed accounts highlighted, and `checks_before` (red) vs `checks_after` (7/7 green) side by side, under a **SANDBOX PASSED** banner (`sandbox.passed: true`) with the badge **"Daytona sandbox <short id> · remote checks match"**. The guide strip is on **Sandbox validated**. The unsafe attempt shows a red **SANDBOX REJECTED** card with reason **Lineage Guard**: "Reverses original entry JE… of FT…; only the duplicate effect JE… may be reversed". It also shows "Integrity checks after applying: 7/7" and "Real ledger unchanged". The agent's own proposal still shows **SANDBOX PASSED**. (**Wrong amount (+100 minor)** is blocked by the ledger guard before it's applied; use it only if asked.) Approving as `blackbox-agent` shows a visible **403** inline. Approving as `ops.lead@bank` moves the stepper to `correcting` and the guide strip to **Approved & corrected**.
+- **Say:** "BLACKBOX proposes a fix: compensating entries, not deletions. Before anyone sees it, the fix is applied to an isolated copy of the bank, and all seven checks pass there. The correction isn't just simulated in our process: it's replayed in an isolated Daytona cloud sandbox, and the remote result must match. What if someone tries a different fix: reversing the original posting instead of the duplicate? (click) All seven checks would pass, balanced and plausible, but BLACKBOX still refuses, because it would erase the legitimate payment's history. The real ledger wasn't touched. Now, can the AI approve its own fix? (click) 403. No. The agent is structurally barred from moving money. Only an authorized human can do it. The ops lead approves."
+
+## 3:45–4:30 · Compensating correction, 7/7, INTEGRITY RESTORED
+- **Click:** sidebar → **Recovery Verification**. Then **Release settlement-svc**.
+- **Screen:** applied corrections (`kind: compensation`, each with `corrects_entry_id` → the original entry) and the note that the original is preserved. The final `verification` checks are all green, the guide strip reaches **Verified**, and **INTEGRITY RESTORED** appears big (incident `resolved`). The status bar shows **HEALTHY · 7/7**. The audit history (`/api/audit`) lists every step with its `actor`, including the refused agent approval. After Release, the held payment(s) settle normally.
+- **Say:** "The correction is a new, linked entry. The original double posting is still there, because auditors and regulators need to see what happened, not a cleaned-up story. Seven of seven checks pass and integrity is restored. Every step is in the audit log, including the AI's refused approval. Releasing the service, the held payments now settle."
+
+## 4:30–5:00 · Built with Devin (engineering evidence)
+- **Click:** switch to the Graphify tab ([`docs/graphify/graphify-out/graph.html`](https://github.com/ByelNegm/ordo-sentinel/blob/docs/graphify/docs/graphify/graphify-out/graph.html) ([PR #9](https://github.com/ByelNegm/ordo-sentinel/pull/9), branch `docs/graphify`)) with the `.approve()` node selected, then the PR list (https://github.com/ByelNegm/ordo-sentinel/pulls) or [DEVIN_USAGE.md](DEVIN_USAGE.md).
+- **Screen:** the interactive code knowledge graph (337 nodes, 1,147 edges, built with zero LLM tokens), with the edges from `.approve()` tracing down to the ledger append. Then the PR list, review comments, backend [PR #7](https://github.com/ByelNegm/ordo-sentinel/pull/7), UI [PR #8](https://github.com/ByelNegm/ordo-sentinel/pull/8), and the test output: **77 backend tests** and **31 UI tests** passed.
+- **Say:** "We built this with Devin as an engineering team: a lead session orchestrating parallel builder sessions per module, an independent review gate that never wrote the code it reviewed, and a frozen API contract that let a colleague's Devin build this UI in parallel. The review gate and Devin Review caught real bugs before merge. This Graphify map of our own code traces the path from the human approval gate to the ledger append, and shows that the sandbox only ever touches a copied ledger. We even pivoted products mid-hackathon without rewriting git history. 77 backend and 31 UI tests pass, the full cycle runs in about 8 seconds, and all three fault types (duplicate, missing, tampered) recover end to end. BLACKBOX: balanced isn't correct, and AI never moves the money."
+
+---
+
+## Backup plan (UI fails)
+Narrate the same beats from a terminal, keeping the numbers large (`jq` is required). Base URL `http://localhost:8000`.
+
+```bash
+B=http://localhost:8000
+curl -s -X POST $B/api/reset | jq '{integrity, totals, volume}'           # HEALTHY, 7/7
+curl -s -X POST $B/api/traffic/start                                      # {"running":true}
+curl -s -X POST $B/api/faults/duplicate                                   # {"fault":"duplicate","service":"settlement-svc"}
+sleep 3
+curl -s $B/api/overview | jq '{totals, integrity}'                        # debits == credits, status "violated"
+curl -s $B/api/integrity | jq '.checks[] | {name, pass}'                  # ledger_balanced true; 2 checks false
+curl -s "$B/api/payments?limit=10" | jq '.[] | select(.settlement_count>1)'  # the ×2 payment
+sleep 5
+ID=$(curl -s $B/api/incidents | jq -r '.[0].id')
+curl -s $B/api/incidents/$ID | jq '{status, root_cause, impact_minor, containment, lineage}'
+curl -s $B/api/incidents/$ID | jq '{proposal: .proposal.description, sandbox_passed: .sandbox.passed}'
+curl -s -X POST $B/api/incidents/$ID/sandbox/challenge \
+  -H 'Content-Type: application/json' -d '{"variant":"wrong_amount"}' | jq .   # blocked by ledger guard; real ledger unchanged
+curl -s -w '\nHTTP %{http_code}\n' -X POST $B/api/incidents/$ID/approve \
+  -H 'Content-Type: application/json' -d '{"actor":"blackbox-agent"}'    # HTTP 403
+curl -s -X POST $B/api/incidents/$ID/approve \
+  -H 'Content-Type: application/json' -d '{"actor":"ops.lead@bank"}' | jq .status
+sleep 3
+curl -s $B/api/incidents/$ID | jq '{status, corrections, verification: [.verification.checks[] | {name, pass}]}'
+curl -s "$B/api/ledger?limit=5" | jq '.[] | select(.kind=="compensation") | {id, corrects_entry_id, actor}'
+curl -s -X POST $B/api/services/settlement-svc/release
+curl -s "$B/api/audit?limit=20" | jq '.[] | {actor, action, detail}'
+curl -s -X POST $B/api/traffic/stop
+```
+
+The SSE view, optionally in a split pane: `curl -N $B/api/stream`.
+
+If the backend itself fails, play the pre-recorded run video and narrate over it using the same lines.
+
+## Stage checklist
+- Names and amounts vary per run. Read the debtor, creditor and amount off the screen; never memorize them.
+- Run Reset between rehearsals. Rehearse the full flow 3 times in a row without reloading the page.
+- Only **ops.lead@bank** and **treasury@bank** can approve; **blackbox-agent** always gets 403.
+- If you demo **Inject Missing Settlement** (optional, time permitting): detection waits for a **3-second grace window** before flagging the payment as missing. Say "we give settlement 3 seconds before calling it missing" so the pause doesn't look like a hang. Use `sleep 5` instead of `sleep 3` in the curl backup.
+- **Daytona fallback:** if Daytona is unreachable, the sandbox falls back to local checks within 8s and the badge says so. Approval still depends on local validation, so the demo keeps going. Say "the cloud replay is unreachable, so it's verified locally" and move on.
+- Measured UI timings: with Daytona, inject → `awaiting_approval` takes about 7s. Earlier pre-Daytona runs (5 consecutive runs, one page, no reload, all PASS): duplicate 5.3–5.7s, full cycle about 8s; missing 8.9s / 11.6s; tamper 5.9s / 8.4s.
+- If an incident gets stuck before `awaiting_approval`, check `GET /api/incidents/{id}` → `status`. Fall back to curl and keep talking.
+- Don't say "AI detected": the detection is deterministic. AI (if shown) only explains, and is labeled.

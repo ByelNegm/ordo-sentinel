@@ -1,13 +1,17 @@
-"""Frozen HTTP/SSE contract. Changes require lead approval."""
-from datetime import datetime
+"""Frozen BLACKBOX v1 wire shapes; see docs/API_CONTRACT.md."""
+from datetime import datetime, timezone
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
-Decision = Literal["allow", "hold", "freeze"]
-ScenarioName = Literal["idle", "normal", "drain"]
-Level = Literal["low", "medium", "high", "critical"]
-Money = Annotated[float, Field(ge=0, multiple_of=0.01, allow_inf_nan=False)]
+Money = Annotated[StrictInt, Field(ge=0)]
+PositiveMoney = Annotated[StrictInt, Field(gt=0)]
+Status = Literal["healthy", "violated", "recovering"]
+Fault = Literal["duplicate", "missing", "tamper"]
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Model(BaseModel):
@@ -17,133 +21,265 @@ class Model(BaseModel):
 class Account(Model):
     id: str
     name: str
-    balance: Money
-    available: Money
-    held: Money
-    currency: Literal["AED"]
+    type: Literal["customer", "internal"]
+    balance_minor: StrictInt
+    iban: str | None = None
 
 
-class State(Model):
-    account: Account
-    frozen_clients: list[str]
-    protected_amount: Money
-    scenario: ScenarioName
+class Service(Model):
+    id: Literal["settlement-svc"] = "settlement-svc"
+    status: Literal["running", "quarantined"] = "running"
+    fault: Fault | None = None
+    processed: int = 0
 
 
-class Factor(Model):
-    code: str
-    label: str
-    weight: float
+class PaymentInstruction(Model):
+    id: str
+    idempotency_key: str
+    debtor: str
+    creditor: str
+    amount_minor: PositiveMoney
+    currency: Literal["AED"] = "AED"
+    created_at: datetime
+    status: Literal["accepted", "settled", "held", "missing", "discrepancy"] = "accepted"
+    settlement_count: int = 0
+    expected_hash: str
+    reference: str | None = None
+    purpose: str | None = None
+    purpose_label: str | None = None
+    debtor_name: str | None = None
+    creditor_name: str | None = None
 
 
-class Risk(Model):
-    score: int = Field(ge=0, le=100)
-    level: Level
-    factors: list[Factor]
+class SettlementEvent(Model):
+    id: str
+    instruction_id: str
+    seq: int
+    service: str
+    debtor: str
+    creditor: str
+    amount_minor: PositiveMoney
+    payload_hash: str
+    ts: datetime
 
 
-class Counterparty(Model):
+class PostingLine(Model):
+    account: str
+    side: Literal["debit", "credit"]
+    amount_minor: PositiveMoney
+
+
+class JournalEntry(Model):
+    id: str
+    kind: Literal["settlement", "compensation"]
+    instruction_id: str
+    event_id: str | None
+    corrects_entry_id: str | None
+    lines: list[PostingLine]
+    ts: datetime
+    actor: str
+
+
+class Check(Model):
     name: str
-    iban: str
-    country: str = Field(pattern=r"^[A-Z]{2}$")
-    is_new: bool
-    offshore: bool
+    passed: bool = Field(alias="pass")
+    detail: str
 
 
-class Txn(Model):
+class IntegrityReport(Model):
+    status: Status
+    checks: list[Check]
+    ts: datetime
+
+
+class TimelineItem(Model):
+    ts: datetime
+    kind: Literal["instruction", "settlement", "posting", "detection", "investigation",
+                  "containment", "proposal", "sandbox", "approval", "correction", "verification"]
+    ref: str | None
+    detail: str
+
+
+class RootCause(Model):
+    service: str
+    summary: str
+    confidence: Literal["high", "medium", "low"]
+    method: Literal["deterministic", "llm"]
+
+
+class Lineage(Model):
+    instruction_id: str
+    event_ids: list[str]
+    entry_ids: list[str]
+
+
+class Containment(Model):
+    service: str
+    action: Literal["quarantine"]
+    at: datetime
+    held_instructions: int
+
+
+class Proposal(Model):
+    id: str
+    description: str
+    entries: list[JournalEntry]
+
+
+class SandboxReport(Model):
+    passed: bool
+    checks_before: list[Check]
+    checks_after: list[Check]
+    balances_before: dict[str, StrictInt]
+    balances_after: dict[str, StrictInt]
+    ts: datetime
+    runner: Literal["daytona", "local"] = "local"
+    runner_id: str | None = None
+    remote_match: bool | None = None
+    runner_note: str | None = None
+
+
+class SandboxChallengeRequest(Model):
+    variant: Literal["wrong_amount", "reverse_original"]
+
+
+class RejectionReason(Model):
+    rule: str
+    detail: str
+
+
+class SandboxChallengeResponse(Model):
+    variant: Literal["wrong_amount", "reverse_original"]
+    proposal: Proposal
+    sandbox: SandboxReport
+    ledger_unchanged: bool
+    applied: bool
+    rejection_reasons: list[RejectionReason]
+
+
+class Approval(Model):
+    actor: str
+    at: datetime
+
+
+class Incident(Model):
+    id: str
+    type: Literal["duplicate_settlement", "missing_settlement", "tampered_settlement"]
+    status: Literal["detected", "investigating", "contained", "validating", "awaiting_approval",
+                    "correcting", "resolved", "rejected", "failed"]
+    detected_at: datetime
+    violations: list[Check]
+    affected_payments: list[str]
+    affected_accounts: list[str]
+    impact_minor: Money
+    root_cause: RootCause
+    lineage: list[Lineage]
+    timeline: list[TimelineItem]
+    containment: Containment | None = None
+    proposal: Proposal | None = None
+    sandbox: SandboxReport | None = None
+    approval: Approval | None = None
+    corrections: list[str] = Field(default_factory=list)
+    summary_text: str | None = None
+    verification: IntegrityReport | None = None
+
+
+class AuditRecord(Model):
     id: str
     ts: datetime
-    amount: Money
-    currency: Literal["AED"]
-    direction: Literal["out", "in"]
-    counterparty: Counterparty
-    channel: Literal["api", "app", "card"]
-    client_id: str
-    device_id: str
-    risk: Risk
-    decision: Decision
-    status: Literal["posted", "held", "blocked"]
+    actor: str
+    action: str
+    ref: str | None
+    detail: str
 
 
-class CustomerMessage(Model):
-    en: str
-    ar: str
+class Totals(Model):
+    debits_minor: Money
+    credits_minor: Money
+    ledger_entries: int
 
 
-class Explanation(Model):
-    customer_message: CustomerMessage
-    analyst_explanation: str
+class Volume(Model):
+    instructions: int
+    settled: int
+    pending: int
+    held: int
 
 
-class Alert(Explanation):
-    id: str
-    txn_ids: list[str]
-    severity: Level
-    title: str
-    actions: list[Literal["confirm", "deny"]]
-    expires_at: datetime
+class IntegritySummary(Model):
+    status: Status
+    failing_checks: int
 
 
-class DecisionRequest(Model):
-    decision: Literal["confirm", "deny"]
+class Overview(Model):
+    accounts: list[Account]
+    totals: Totals
+    volume: Volume
+    services: list[Service]
+    integrity: IntegritySummary
+    open_incidents: int
+    traffic_running: bool
 
 
-class AlertResolved(Model):
-    id: str
-    resolution: Literal["confirmed", "denied", "expired"]
-    by: Literal["customer", "analyst", "auto"]
+class ActorRequest(Model):
+    actor: str
 
 
-class AccountUpdated(Model):
-    balance: Money
-    available: Money
-    held: Money
-    frozen_clients: list[str]
-    protected_amount: Money
+class TrafficStatus(Model):
+    running: bool
 
 
-class ScenarioStatus(Model):
-    name: ScenarioName
-    step: int = Field(ge=0)
-    total: int = Field(ge=0)
+class FaultResponse(Model):
+    fault: Fault
+    service: Literal["settlement-svc"] = "settlement-svc"
 
 
-class EventEnvelope(Model):
-    type: str
+class PostedSettlement(Model):
+    event: SettlementEvent
+    entry: JournalEntry
+
+
+class PaymentAccepted(Model):
+    type: Literal["payment.accepted"] = "payment.accepted"
     ts: datetime
-    data: dict
+    data: PaymentInstruction
 
 
-class TxnScoredEvent(Model):
-    type: Literal["txn.scored"] = "txn.scored"
+class SettlementPosted(Model):
+    type: Literal["settlement.posted"] = "settlement.posted"
     ts: datetime
-    data: Txn
+    data: PostedSettlement
 
 
-class AlertCreatedEvent(Model):
-    type: Literal["alert.created"] = "alert.created"
+class IntegrityUpdated(Model):
+    type: Literal["integrity.updated"] = "integrity.updated"
     ts: datetime
-    data: Alert
+    data: IntegrityReport
 
 
-class AlertResolvedEvent(Model):
-    type: Literal["alert.resolved"] = "alert.resolved"
+class IncidentUpdated(Model):
+    type: Literal["incident.updated"] = "incident.updated"
     ts: datetime
-    data: AlertResolved
+    data: Incident
 
 
-class AccountUpdatedEvent(Model):
-    type: Literal["account.updated"] = "account.updated"
+class ServiceUpdated(Model):
+    type: Literal["service.updated"] = "service.updated"
     ts: datetime
-    data: AccountUpdated
+    data: Service
 
 
-class ScenarioStatusEvent(Model):
-    type: Literal["scenario.status"] = "scenario.status"
+class AuditAppended(Model):
+    type: Literal["audit.appended"] = "audit.appended"
     ts: datetime
-    data: ScenarioStatus
+    data: AuditRecord
 
 
-Event = Annotated[Union[TxnScoredEvent, AlertCreatedEvent, AlertResolvedEvent,
-                        AccountUpdatedEvent, ScenarioStatusEvent], Field(discriminator="type")]
-EVENT_ADAPTER = TypeAdapter(Event)
+class Reset(Model):
+    type: Literal["reset"] = "reset"
+    ts: datetime
+    data: Overview
+
+
+Event = Annotated[Union[PaymentAccepted, SettlementPosted, IntegrityUpdated, IncidentUpdated,
+                        ServiceUpdated, AuditAppended, Reset], Field(discriminator="type")]

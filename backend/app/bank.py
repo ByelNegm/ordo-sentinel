@@ -1,242 +1,132 @@
-"""Process-local bank. Mutations are synchronous on the app event loop."""
-
-from collections import Counter
+"""Synthetic instructions and account identities, independent of settlement evidence."""
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from random import Random
-from statistics import mean, pstdev
+import hashlib
+import random
+from typing import TYPE_CHECKING
 
-from .models import Account, AccountUpdated, Alert, AlertResolved, Counterparty, Risk, State, Txn
-from .risk import CustomerBaseline, RiskContext
+from .ledger import Ledger
+from .models import Account, PaymentInstruction, SettlementEvent, utcnow
 
-# main.py uses this to serve the development fixtures.
-FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
-UAE = timezone(timedelta(hours=4))
-NORMAL_START = datetime(2025, 11, 21, 13, tzinfo=UAE)
-DRAIN_START = datetime(2025, 11, 22, 2, tzinfo=UAE)
-RECENT_WINDOW = timedelta(minutes=1)
+if TYPE_CHECKING:
+    from .settlement import SettlementService
 
-GROCER = Counterparty(name="Neighborhood Grocer", iban="AE000000000000000000001",
-                       country="AE", is_new=False, offshore=False)
-CAFE = Counterparty(name="Corner Café", iban="AE000000000000000000005",
-                     country="AE", is_new=False, offshore=False)
-UTILITY = Counterparty(name="City Utilities", iban="AE000000000000000000006",
-                        country="AE", is_new=False, offshore=False)
-
-
-def _seed_history() -> tuple[Txn, ...]:
-    rng = Random(91)
-    history = []
-    for days_ago in range(90, 0, -1):
-        date = NORMAL_START - timedelta(days=days_ago)
-        for hour in sorted(rng.sample(range(8, 22), 2)):
-            payee = rng.choice((GROCER, CAFE, UTILITY))
-            amount = rng.randrange(15, 350)
-            channel, client_id = "card", "card_001"
-            if payee == UTILITY:
-                amount = rng.randrange(350, 1250)
-                channel, client_id = ("api", "api_aisha_bills") if days_ago % 3 == 0 else ("app", "app_aisha")
-            history.append(Txn(
-                id=f"hist_{len(history) + 1:03}",
-                ts=date.replace(hour=hour, minute=rng.randrange(60)),
-                amount=amount, currency="AED", direction="out", counterparty=payee.model_copy(),
-                channel=channel, client_id=client_id,
-                device_id="device_known", risk=Risk(score=0, level="low", factors=[]),
-                decision="allow", status="posted",
-            ))
-    return tuple(history)
+SEED_TIME = datetime(2026, 11, 21, 8, tzinfo=timezone.utc)
+PURPOSES = {
+    "SAL": ("Salary", 800_000, 4_500_000),
+    "SUP": ("Supplier payment", 250_000, 2_500_000),
+    "RNT": ("Rent", 300_000, 1_800_000),
+    "UTL": ("Utilities", 30_000, 250_000),
+    "INV": ("Invoice settlement", 150_000, 3_500_000),
+    "FND": ("Opening balance transfer", 20_000_000, 45_000_000),
+}
 
 
-def _catalog() -> list[Txn]:
-    script = [
-        Txn(id="txn_normal", ts=NORMAL_START, amount=85, currency="AED",
-            direction="out", counterparty=GROCER.model_copy(),
-            channel="card", client_id="card_001", device_id="device_known",
-            risk=Risk(score=0, level="low", factors=[]), decision="allow", status="posted")
-    ]
-    for step, (txn_id, amount, name, iban, country) in enumerate((
-        ("txn_drain_001", 1200, "New Services A", "AE000000000000000000002", "AE"),
-        ("txn_drain_002", 1800, "New Services B", "AE000000000000000000003", "AE"),
-        ("txn_wire", 450000, "Pelagic Holdings", "SC000000000000000000004", "SC"),
-    )):
-        script.append(Txn(
-            id=txn_id, ts=DRAIN_START + timedelta(seconds=step), amount=amount,
-            currency="AED", direction="out",
-            counterparty=Counterparty(name=name, iban=iban, country=country,
-                                      is_new=True, offshore=country != "AE"),
-            channel="api", client_id="api_partner_7", device_id="device_api_new",
-            risk=Risk(score=0, level="low", factors=[]),
-            decision="hold" if country == "AE" else "freeze",
-            status="held" if country == "AE" else "blocked",
-        ))
-    return script
+def uae_iban(account_number: int) -> str:
+    bban = f"033{account_number:016d}"
+    return f"AE{98 - int(bban + '101400') % 97:02d}{bban}"
 
 
-class BankError(Exception):
-    def __init__(self, status: int, detail: str) -> None:
-        self.status = status
-        self.detail = detail
-        super().__init__(detail)
+def payment_reference(sequence: int) -> str:
+    value, suffix = 42_000_000 + sequence, ""
+    while value:
+        value, digit = divmod(value, 36)
+        suffix = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[digit] + suffix
+    return f"FT{SEED_TIME:%y%j}{suffix.zfill(5)}"
+
+
+def money_text(amount_minor: int) -> str:
+    return f"AED {amount_minor // 100:,}.{amount_minor % 100:02d}"
+
+
+def canonical_hash(instruction_id: str, debtor: str, creditor: str, amount_minor: int) -> str:
+    """Canonical UTF-8 id|debtor|creditor|amount_minor; no whitespace or float conversion."""
+    return hashlib.sha256(f"{instruction_id}|{debtor}|{creditor}|{amount_minor}".encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class AccountIdentity:
+    id: str
+    name: str
+    type: str
+    iban: str
 
 
 class Bank:
     def __init__(self) -> None:
-        self.reset()
+        names = ("Al Noor Trading LLC", "Gulf Horizon Logistics FZE", "Fatima Al Mansoori",
+                 "Rashid Medical Centre", "Mariam Al Mazrouei", "Emirates Precision Industries LLC",
+                 "Khalid Al Nuaimi", "Al Waha Utilities Services LLC", "Layla Al Suwaidi",
+                 "Palm Grove Properties LLC")
+        base = random.Random(42).randrange(10**15, 10**16 - 12)
+        self.accounts = {
+            f"customer-{i:02}": AccountIdentity(f"customer-{i:02}", name, "customer", uae_iban(base + i))
+            for i, name in enumerate(names, 1)
+        }
+        self.accounts["clearing"] = AccountIdentity("clearing", "UAEFTS Settlement Clearing", "internal", uae_iban(base + 11))
+        self.accounts["treasury"] = AccountIdentity("treasury", "Central Treasury – Liquidity Pool", "internal", uae_iban(base + 12))
+        self.ledger = Ledger(self.accounts)
+        self.instructions: dict[str, PaymentInstruction] = {}
+        self.events: list[SettlementEvent] = []
+        self._keys: dict[str, str] = {}
+        self._rng = random.Random(42)
 
-    def reset(self) -> State:
-        self.state = State(
-            account=Account(id="acct_001", name="Aisha Al Mansoori", balance=520000,
-                            available=520000, held=0, currency="AED"),
-            frozen_clients=[], protected_amount=0, scenario="idle",
+    def create_instruction(self, debtor: str, creditor: str, amount_minor: int,
+                           idempotency_key: str | None = None,
+                           created_at: datetime | None = None, purpose: str = "INV") -> PaymentInstruction:
+        if debtor not in self.accounts or creditor not in self.accounts or debtor == creditor:
+            raise ValueError("Payment must name two distinct known accounts")
+        if type(amount_minor) is not int or amount_minor <= 0:
+            raise ValueError("Money must be a positive integer in minor units")
+        if purpose not in PURPOSES:
+            raise ValueError("Unknown payment purpose")
+        if idempotency_key in self._keys:
+            existing = self.instructions[self._keys[idempotency_key]]
+            if (existing.debtor, existing.creditor, existing.amount_minor) != (debtor, creditor, amount_minor):
+                raise ValueError("Idempotency key conflicts with instruction")
+            return existing
+        identifier = f"payment-{len(self.instructions) + 1:06}"
+        key = idempotency_key or f"idem-{identifier}"
+        if key in self._keys:
+            raise ValueError("Idempotency key already exists")
+        instruction = PaymentInstruction(
+            id=identifier, idempotency_key=key, debtor=debtor, creditor=creditor,
+            amount_minor=amount_minor, created_at=created_at or utcnow(),
+            expected_hash=canonical_hash(identifier, debtor, creditor, amount_minor),
+            reference=payment_reference(len(self.instructions) + 1), purpose=purpose,
+            purpose_label=PURPOSES[purpose][0], debtor_name=self.accounts[debtor].name,
+            creditor_name=self.accounts[creditor].name,
         )
-        self.history = _seed_history()
-        amounts = [txn.amount for txn in self.history]
-        hours = Counter(txn.ts.hour for txn in self.history)
-        self.baseline = CustomerBaseline(
-            hour_histogram=[hours[hour] for hour in range(24)],
-            amount_mean=mean(amounts), amount_std=pstdev(amounts),
-            known_payees={txn.counterparty.iban for txn in self.history},
-            known_devices={txn.device_id for txn in self.history},
-            known_api_clients={txn.client_id for txn in self.history if txn.channel == "api"},
-        )
-        self.catalog = _catalog()
-        self.known_clients = {txn.client_id for txn in self.history}
-        self.transactions: dict[str, Txn] = {}
-        self.alerts: dict[str, Alert] = {}
-        self.resolutions: dict[str, AlertResolved] = {}
-        self.protected_ids: set[str] = set()
-        return self.snapshot()
+        self.instructions[identifier] = instruction
+        self._keys[key] = identifier
+        return instruction
 
-    def snapshot(self) -> State:
-        return self.state.model_copy(deep=True)
+    def next_payment(self, created_at: datetime | None = None) -> PaymentInstruction:
+        purpose = self._rng.choice(["SAL", "SUP", "RNT", "UTL", "INV"])
+        corporates = ["customer-01", "customer-02", "customer-04", "customer-06", "customer-10"]
+        debtor = self._rng.choice(corporates)
+        creditors = (["customer-03", "customer-05", "customer-07", "customer-09"] if purpose == "SAL"
+                     else ["customer-08"] if purpose == "UTL" else ["customer-10"] if purpose == "RNT"
+                     else corporates)
+        creditor = self._rng.choice([a for a in creditors if a != debtor] or ["customer-01"])
+        _, low, high = PURPOSES[purpose]
+        amount = self._rng.randint(low // 100, high // 100 - 1) * 100 + self._rng.randint(1, 99)
+        return self.create_instruction(debtor, creditor, amount, created_at=created_at, purpose=purpose)
 
-    def account_update(self) -> AccountUpdated:
-        account = self.state.account
-        return AccountUpdated(
-            balance=account.balance, available=account.available, held=account.held,
-            frozen_clients=self.state.frozen_clients.copy(),
-            protected_amount=self.state.protected_amount,
-        )
+    def seed(self, settlement: "SettlementService") -> None:
+        """Exactly 100 instructions, each processed through the ordinary settlement path."""
+        for i, account in enumerate(list(self.accounts)[:10]):
+            amount = self._rng.randint(250_000, 449_999) * 100 + self._rng.randint(1, 99)
+            payment = self.create_instruction("clearing", account, amount,
+                                              created_at=SEED_TIME + timedelta(seconds=i), purpose="FND")
+            settlement.enqueue(payment)
+            settlement.process_queue(posted_at=payment.created_at)
+        for i in range(10, 100):
+            payment = self.next_payment(SEED_TIME + timedelta(seconds=i))
+            settlement.enqueue(payment)
+            settlement.process_queue(posted_at=payment.created_at)
 
-    def recent_transactions(self, candidate: Txn) -> list[Txn]:
-        start = candidate.ts - RECENT_WINDOW
-        return [txn for txn in self.transactions.values()
-                if txn.id != candidate.id and start <= txn.ts <= candidate.ts]
-
-    def cumulative_outflow(self, candidate: Txn, recent: list[Txn]) -> float:
-        """Count prior outgoing instructions in the window and the candidate once."""
-        amount = sum(txn.amount for txn in recent if txn.direction == "out")
-        if candidate.direction == "out":
-            amount += candidate.amount
-        return round(amount, 2)
-
-    def risk_context(self, candidate: Txn) -> RiskContext:
-        recent = self.recent_transactions(candidate)
-        return RiskContext(
-            balance=self.state.account.balance, cumulative_drain=self.cumulative_outflow(candidate, recent),
-            recent_transactions=recent, baseline=self.baseline,
-        )
-
-    def _available(self) -> None:
-        account = self.state.account
-        account.available = round(account.balance - account.held, 2)
-
-    def _change_balance(self, txn: Txn) -> None:
-        account = self.state.account
-        delta = txn.amount if txn.direction == "in" else -txn.amount
-        account.balance = round(account.balance + delta, 2)
-
-    def post(self, txn: Txn) -> None:
-        """Post once after policy."""
-        if txn.id in self.transactions:
-            return
-        if txn.direction == "out" and txn.amount > self.state.account.available:
-            raise BankError(409, "Insufficient available funds")
-        self.transactions[txn.id] = txn.model_copy(update={"status": "posted", "decision": "allow"}, deep=True)
-        self.known_clients.add(txn.client_id)
-        self._change_balance(txn)
-        self._available()
-
-    def hold(self, txn: Txn) -> None:
-        """Hold once, reserving outgoing amounts without debiting the balance."""
-        if txn.id in self.transactions:
-            return
-        account = self.state.account
-        if txn.direction == "out":
-            if txn.amount > account.available:
-                raise BankError(409, "Insufficient available funds")
-            account.held = round(account.held + txn.amount, 2)
-        self.transactions[txn.id] = txn.model_copy(update={"status": "held", "decision": "hold"}, deep=True)
-        self.known_clients.add(txn.client_id)
-        self._available()
-
-    def block(self, txn: Txn) -> None:
-        """Block without reserving funds and freeze the originating client."""
-        if txn.id not in self.transactions:
-            self.transactions[txn.id] = txn.model_copy(update={"status": "blocked", "decision": "freeze"}, deep=True)
-            self.freeze(txn.client_id)
-
-    def freeze(self, client_id: str) -> None:
-        self.known_clients.add(client_id)
-        if client_id not in self.state.frozen_clients:
-            self.state.frozen_clients.append(client_id)
-
-    def unfreeze(self, client_id: str) -> AccountUpdated:
-        if client_id not in self.known_clients:
-            raise BankError(404, "Client not found")
-        if client_id in self.state.frozen_clients:
-            self.state.frozen_clients.remove(client_id)
-        return self.account_update()
-
-    def upsert_alert(self, alert: Alert) -> None:
-        if alert.id in self.resolutions:
-            return
-        if not alert.txn_ids or any(txn_id not in self.transactions for txn_id in alert.txn_ids):
-            raise BankError(409, "Alert must reference recorded transactions")
-        self.alerts[alert.id] = alert.model_copy(deep=True)
-
-    def resolve(self, alert_id: str, decision: str) -> AlertResolved:
-        """Apply a customer decision once, validating a group before changing funds."""
-        if decision not in ("confirm", "deny"):
-            raise BankError(422, "Decision must be confirm or deny")
-        expected = "confirmed" if decision == "confirm" else "denied"
-        if prior := self.resolutions.get(alert_id):
-            if prior.resolution != expected:
-                raise BankError(409, "Alert already resolved differently")
-            return prior
-        if alert_id not in self.alerts:
-            raise BankError(404, "Alert not found")
-        return self._resolve(AlertResolved(id=alert_id, resolution=expected, by="customer"))
-
-    def expire_alerts(self, now: datetime) -> list[AlertResolved]:
-        due = [alert.id for alert in self.alerts.values() if alert.expires_at <= now]
-        return [self._resolve(AlertResolved(id=alert_id, resolution="expired", by="auto"))
-                for alert_id in due]
-
-    def _resolve(self, result: AlertResolved) -> AlertResolved:
-        txns = [self.transactions[txn_id]
-                for txn_id in dict.fromkeys(self.alerts[result.id].txn_ids)]
-        confirmed = result.resolution == "confirmed"
-        if confirmed:
-            if any(txn.client_id in self.state.frozen_clients for txn in txns):
-                raise BankError(409, "Client is frozen; confirmation cannot post funds")
-            if any(txn.status != "held" for txn in txns):
-                raise BankError(409, "Only held transactions can be confirmed")
-
-        account = self.state.account
-        for txn in txns:
-            prevented = txn.status == "held" or txn.decision == "freeze"
-            if txn.status == "held":
-                if txn.direction == "out":
-                    account.held = round(account.held - txn.amount, 2)
-                if confirmed:
-                    self._change_balance(txn)
-                txn.status = "posted" if confirmed else "blocked"
-            if (result.resolution == "denied" and prevented and txn.direction == "out"
-                    and txn.id not in self.protected_ids):
-                self.state.protected_amount = round(self.state.protected_amount + txn.amount, 2)
-                self.protected_ids.add(txn.id)
-        self._available()
-        self.resolutions[result.id] = result
-        del self.alerts[result.id]
-        return result
+    def account_snapshots(self) -> list[Account]:
+        balances = self.ledger.balances()
+        return [Account(id=a.id, name=a.name, type=a.type, balance_minor=balances[a.id], iban=a.iban)
+                for a in self.accounts.values()]
