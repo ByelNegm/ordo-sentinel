@@ -1,40 +1,33 @@
-# MVP task checklist
-All target times: **2026-11-21, Asia/Dubai**. Check only when complete; append evidence/decisions to [PROGRESS.md](PROGRESS.md). Follow [GOAL.md](GOAL.md); new scope must pass its drift check. Backend branches api/*; frontend ui/*; PRs into main.
+# TASKS — BLACKBOX
+Owners: **Devin** = backend/lead, **UI** = colleague's Devin session. Times are Dubai.
 
-## Backend — ByelNegm + Devin
-- [x] [ByelNegm + Devin] FastAPI skeleton, /api/state and fixtures served for development — **12:15**.
-- [x] [ByelNegm + Devin] Mock bank + deterministic one-customer seed/baseline — **12:30**.
-- [x] [ByelNegm + Devin] SSE stream, 15s heartbeat, X-Accel-Buffering: no — **12:45**.
-- [x] [ByelNegm + Devin] asyncio normal/drain scenario runner — **13:00**.
-- [x] [ByelNegm + Devin] Risk engine, customer stats and reason codes — **13:00**.
-- [x] [ByelNegm + Devin] Policy: <40 allow, 40–75 hold, >75 or cumulative drain >30% freeze client — **13:15**.
-- [x] [ByelNegm + Devin] Decision/unfreeze/reset endpoints; idempotency and runner cancellation — **13:30**.
-- [x] [ByelNegm + Devin] Async cached LLM explainer + immediate EN/AR template fallback — **13:30**.
-- [ ] [ByelNegm + Devin] CORS/proxy check with frontend; Vite /api → :8000 — **13:45**.
-- [x] [ByelNegm + Devin] pytest drain scenario, policy boundaries, duplicate deny, reset and LLM failure; measure requested SSE timestamp delta (0.0 ms, simulated timestamps, not wall-clock latency) — **14:30**.
-- [x] [ByelNegm + Devin] Backend REST/SSE integration: normal → drain → wire Deny → protected counter → reset, twice via live curl — **13:45**.
+## M0 — Pivot (13:15–13:30)
+- [x] Branch `pivot/blackbox` from main; stop Ordo builders (Devin)
+- [x] API contract v1 + frontend brief (Devin)
+- [x] GOAL / TASKS / PROGRESS / README rewritten (Devin)
 
-## Frontend — colleague + her Devin
-- [ ] [Frontend colleague + Devin] React/Vite/Tailwind skeleton, /phone and /analyst routes — **12:15**.
-- [ ] [Frontend colleague + Devin] VITE_USE_MOCK adapter + timed fixtures/events.ndjson replay; interactive deny, reset cancellation — **12:45**.
-- [ ] [Frontend colleague + Devin] Analyst dashboard: balances, transactions, risks, alerts, frozen client and scenario/reset controls — **13:15**.
-- [ ] [Frontend colleague + Devin] Phone guardian: message, Confirm/Deny, protected counter and action states — **13:15**.
-- [ ] [Frontend colleague + Devin] Arabic RTL and readable bilingual messages — **13:30**.
-- [ ] [Frontend colleague + Devin] Integrate live REST/SSE; reconnect, empty/error states and both-route visual check — **13:45**.
+## M1 — Backend P0, duplicate settlement (→14:30, Devin)
+- [ ] Models, ledger, bank seed (100 payments), settlement-svc with fault modes
+- [ ] 7 integrity checks + reconciliation
+- [ ] Incident pipeline: investigate → contain → propose → sandbox → awaiting_approval
+- [ ] Approval gate (403/409), idempotent compensation, verification, release
+- [ ] Traffic trickle, reset, SSE, audit log
+- [ ] pytest suite green; full curl flow 3× from clean seed
+- [ ] Independent review gate pass
 
-## Shared / Demo
-- [x] [ByelNegm + Devin] Repo initialized and docs pushed — **11:50**.
-- [x] [ByelNegm + Devin] Plan/API contract/fixtures/frontend brief drafted and fixtures validated — **11:50**.
-- [x] [ByelNegm + Devin] GOAL/TASKS/PROGRESS anti-drift docs and handoff links — **12:00**.
-- [ ] [ByelNegm] Resolve frontend collaborator invite — **12:00**.
-- [ ] [Both owners + Devin sessions] Contract + fixtures freeze — **12:15**.
-- [ ] [Both owners + Devin sessions] End-to-end integration of full demo arc — **13:45**.
-- [ ] [Both owners] README run instructions for backend, frontend and mock mode — **14:30**.
-- [ ] [Both owners] Feature freeze; only demo-breaking fixes afterward — **14:45**.
-- [ ] [Both owners] Rehearsal ×3: normal → drain → wire Deny → protected counter → reset — **15:00**.
-- [ ] [ByelNegm + frontend colleague] Record five-minute Cap video, showing parallel Devin use — **15:00**.
-- [ ] [ByelNegm] Submit GitHub repository + video link — **15:30** (hard deadline **16:00**).
+## M2 — UI (→14:45, UI)
+- [ ] Shell, status bar, SSE hook, mock mode
+- [ ] Bank Operations · Attack Simulator
+- [ ] Incident Investigation · Recovery Sandbox · Recovery Verification
+- [ ] Acceptance flow 3× against the live backend
+
+## M3 — P2 scenarios (14:30–15:00, Devin)
+- [ ] Missing settlement · Tampered settlement (detection + recovery)
+
+## M4 — Ship (15:00–16:00, Team)
+- [ ] Feature freeze 15:00; e2e demo runs ×3
+- [ ] 5-min script + video (incl. Devin engineering evidence)
+- [ ] Submit by 15:30; rehearse
 
 ## Parking Lot
-- [ ] [Both owners] Optional Daytona hosting only if ≤20 minutes and demo-safe — **deferred; no commitment before 15:30 submission**.
-- [ ] [Both owners] Other scope proposals: log rationale against GOAL.md before scheduling — **post-hackathon**.
+- LLM-written incident narrative (schema-validated, labeled)

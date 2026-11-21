@@ -1,25 +1,20 @@
-# Ordo Sentinel — north star
-Protect the customer when authentication succeeds but intent is absent: show bank-side autonomous transaction defense stopping an asleep customer's 2 AM API drain, paired with a clear customer guardian UI. Build only a credible, repeatable hackathon MVP: deterministic rules/statistics control money movement; the LLM explains in EN/AR and never decides. Team **ordo_system** ships the smallest working proof, not a production bank.
+# GOAL — BLACKBOX
 
-## Single demo success criterion
-**Normal → 2 AM drain → AED 450,000 offshore wire frozen → phone Deny → “AED 450,000 protected” → reset; repeatable.** Five minutes, no Q&A. Target wire enforcement <1 second; measure before claiming it. Freeze the API client/consent token and block the wire, not the entire account. Deny the wire before the smaller burst to preserve the headline counter.
+**North star:** prove, live, that BLACKBOX autonomously reconstructs and recovers a banking-infrastructure integrity failure without hiding history and without letting AI move money.
 
-## Judging criteria
-- **Innovation:** defend transaction intent after successful authentication.
-- **Technical:** working rules/stats, deterministic policy, SSE and safe action handling; LLM fallback.
-- **Practicality:** bank-side intervention with an understandable, independent-channel guardian simulation.
-- **Demo Quality:** coherent five-minute story, legible screens, repeatable reset and measured claims.
-- **Devin Use Case:** show parallel backend/frontend Devin sessions and their integration in the video.
+**The one demo (P0):** healthy bank → duplicate settlement fault → integrity violation (ledger still balanced, but wrong) → autonomous investigation → service containment → recovery proposal → sandbox validation → human approval → compensating correction → verified reconciliation. Repeatable from Reset.
 
-## Scope guardrails
-**In scope:** single-process Python FastAPI; seeded in-memory one-customer bank with 90-day baseline; normal/drain asyncio runner; 0–100 risk + reasons; allow/hold/freeze policy; decision/unfreeze/reset REST endpoints; SSE with 15s heartbeat; async cached EN/AR LLM explanations + templates; React/Vite/Tailwind /phone and /analyst; fixtures/mock replay; tests and demo recording.
+**Track:** Protect the Big Guy — Code, Data & Infrastructure Rails. Deadline 16:00 Dubai (submit 15:30).
 
-**Out of scope:** authentication, real DB, real payments, real SMS/push, ML training, multiple customers, native mobile and production-security claims. Daytona hosting only if ≤20 minutes; Graphify/Collabute skipped unless an immediate quick win.
+## In scope
+- Synthetic bank: accounts, 100+ seeded payments, instructions / settlement events / ledger kept separate, integer minor units.
+- Double-entry, append-only ledger. Independent reconciliation from instructions.
+- Real fault injection in `settlement-svc`: duplicate (P0), missing and tampered (P2).
+- 7 deterministic integrity checks, the incident pipeline, quarantine, the sandbox, an approval gate, idempotent compensating entries, the audit log.
+- A dark command-center UI with 5 views, all wired to the real backend.
 
-## Deadline / drift check
-**2026-11-21, Asia/Dubai: submit GitHub + video by 15:30; hard deadline 16:00.** Contract 12:15; integration 13:45; feature freeze 14:45; Cap recording 15:00.
-
-Before starting new work, name the demo-arc step or judging criterion it serves. If neither, put it in **Parking Lot**, not the active checklist. After feature freeze, only demo-breaking fixes. Coordinate contract changes with both owners; see [plan](docs/PLAN.md), [contract](docs/API_CONTRACT.md), [tasks](TASKS.md) and [progress](PROGRESS.md).
-
-## Parking Lot
-- Post-hackathon ideas only; no active commitments. Record proposed work here with its rationale before expanding scope.
+## Rules
+- Deterministic code decides and corrects. An LLM (optional) may only explain, must be schema-validated, and is labeled. The fallback is labeled "Deterministic".
+- No history rewrite: corrections are new entries linked to the originals.
+- Synthetic data only, no real bank connections, no paid infra, no secrets in the repo.
+- Out of scope: auth, persistence beyond process, deployment, real ML. New ideas go to the Parking Lot in TASKS.md.
