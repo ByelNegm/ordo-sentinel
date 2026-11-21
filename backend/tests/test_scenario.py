@@ -221,7 +221,7 @@ def test_enrichment_is_nonblocking_upserts_live_text_and_cancels_on_reset(monkey
                 raise
 
         monkeypatch.setattr(scenario.explainer, "explain", template)
-        monkeypatch.setattr(scenario.explainer, "enrich", enrich, raising=False)
+        monkeypatch.setattr(scenario.explainer, "enrich", enrich)
         runner.start("normal")
         await runner.task
         async with bus.subscribe() as queue:

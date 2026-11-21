@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Coroutine
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
@@ -159,16 +159,12 @@ class ScenarioRunner:
         {"allow": self.bank.post, "hold": self.bank.hold, "freeze": self.bank.block}[decision](txn)
         posted = self.bank.transactions[txn.id]
         alert = self._alert(posted) if posted.status != "posted" else None
-        # The skeleton supplies only an async stub. Builder C adds a synchronous
-        # template and a separate optional enrichment coroutine.
-        enrich = getattr(explainer, "enrich", None)
         if alert is not None:
             txns = [self.bank.transactions[txn_id].model_copy(deep=True) for txn_id in alert.txn_ids]
-            if enrich is not None:
-                try:
-                    alert = _with_explanation(alert, explainer.explain(alert, txns=txns, balance=ctx.balance))
-                except Exception:
-                    logger.debug("Template unavailable for %s", alert.id, exc_info=True)
+            try:
+                alert = _with_explanation(alert, explainer.explain(alert, txns=txns, balance=ctx.balance))
+            except Exception:
+                logger.debug("Template unavailable for %s", alert.id, exc_info=True)
             new_alert = alert.id not in self.bank.alerts
             self.bank.upsert_alert(alert)
             if new_alert:
@@ -177,8 +173,7 @@ class ScenarioRunner:
         await self.bus.publish(TxnScoredEvent(ts=posted.ts, data=posted))
         if alert is not None:
             await self.bus.publish(AlertCreatedEvent(ts=posted.ts, data=alert))
-            if enrich is not None:
-                self._spawn(self._enrich(enrich, alert, posted.ts, txns, ctx.balance))
+            self._spawn(self._enrich(alert, posted.ts, txns, ctx.balance))
         await self.bus.publish(AccountUpdatedEvent(ts=posted.ts, data=self.bank.account_update()))
 
     def _alert(self, txn: Txn) -> Alert:
@@ -207,12 +202,9 @@ class ScenarioRunner:
             await self.bus.publish(AlertResolvedEvent(ts=now, data=result))
             await self.bus.publish(AccountUpdatedEvent(ts=now, data=self.bank.account_update()))
 
-    async def _enrich(
-        self, enrich: Callable[..., Awaitable[Explanation | None]],
-        alert: Alert, ts: datetime, txns: list[Txn], balance: float,
-    ) -> None:
+    async def _enrich(self, alert: Alert, ts: datetime, txns: list[Txn], balance: float) -> None:
         try:
-            explanation = await enrich(alert.model_copy(deep=True), txns=txns, balance=balance)
+            explanation = await explainer.enrich(alert.model_copy(deep=True), txns=txns, balance=balance)
         except Exception:
             logger.debug("Explanation unavailable for %s", alert.id, exc_info=True)
             return
