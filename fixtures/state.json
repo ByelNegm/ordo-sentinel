@@ -1,0 +1,13 @@
+{
+  "account": {
+    "id": "acct_001",
+    "name": "Aisha Al Mansoori",
+    "balance": 520000,
+    "available": 520000,
+    "held": 0,
+    "currency": "AED"
+  },
+  "frozen_clients": [],
+  "protected_amount": 0,
+  "scenario": "idle"
+}

@@ -1,0 +1,39 @@
+[
+  {
+    "id": "alert_burst",
+    "txn_ids": [
+      "txn_drain_001",
+      "txn_drain_002"
+    ],
+    "severity": "high",
+    "title": "Unusual overnight API transfers",
+    "analyst_explanation": "Two first-time payees received API instructions at 02:00, outside this customer's 90-day daytime baseline. AED 3,000 is held pending an independent customer decision.",
+    "customer_message": {
+      "en": "We paused two unusual overnight payments totaling AED 3,000. Were these yours?",
+      "ar": "أوقفنا مؤقتاً دفعتين غير معتادتين ليلاً بقيمة ٣٬٠٠٠ درهم. هل أجريتهما؟"
+    },
+    "actions": [
+      "confirm",
+      "deny"
+    ],
+    "expires_at": "2025-11-22T02:05:00+04:00"
+  },
+  {
+    "id": "alert_wire",
+    "txn_ids": [
+      "txn_wire"
+    ],
+    "severity": "critical",
+    "title": "AED 450,000 offshore wire blocked",
+    "analyst_explanation": "An unfamiliar API client attempted a rapid offshore wire after two new-payee transfers at 02:00. The AED 450,000 instruction targets 86.55% of the current balance. Deterministic policy froze the consent token before posting; authentication success is not evidence of customer intent.",
+    "customer_message": {
+      "en": "We blocked an unusual AED 450,000 overseas payment at 2 AM from an unfamiliar connected service. Your money has not left. Was this you?",
+      "ar": "حظرنا دفعة خارجية غير معتادة بقيمة ٤٥٠٬٠٠٠ درهم الساعة الثانية صباحاً من خدمة متصلة غير مألوفة. لم تغادر أموالك الحساب. هل أجريت هذه العملية؟"
+    },
+    "actions": [
+      "confirm",
+      "deny"
+    ],
+    "expires_at": "2025-11-22T02:05:02+04:00"
+  }
+]
