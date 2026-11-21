@@ -52,7 +52,8 @@ def test_scripted_scenario_scores_instructions_and_freezes_only_client(normal_fi
         wire = bank.transactions["txn_wire"]
         assert first.decision == second.decision == "hold"
         assert first.status == second.status == "held"
-        assert 40 <= first.risk.score <= second.risk.score <= 75
+        assert 40 <= first.risk.score <= 70
+        assert 40 <= second.risk.score <= 70
         assert wire.decision == "freeze" and wire.status == "blocked"
         assert wire.risk.score > 75
         assert {"OFFSHORE", "BALANCE_DRAIN", "VELOCITY"} <= {f.code for f in wire.risk.factors}

@@ -78,7 +78,7 @@ def score(txn: Txn, ctx: RiskContext) -> Risk:
         z_score = (txn.amount - mean) / max(deviation, mean * 0.10, 1.0)
         if z_score >= 3:
             # Tiny posted purchases should not alone escalate a small transfer to freeze.
-            add("AMOUNT_ZSCORE", "Amount exceeds the 90-day baseline by at least 3 standard deviations",
+            add("AMOUNT_ZSCORE", "Far larger than her usual payments",
                 25 if txn.amount > ctx.balance * 0.01 else 5)
 
     hours = ({hour for hour, count in enumerate(baseline.hour_histogram) if count > 0}
@@ -87,15 +87,16 @@ def score(txn: Txn, ctx: RiskContext) -> Risk:
     unusual_hour = (all(min((txn.ts.hour - h) % 24, (h - txn.ts.hour) % 24) > 2 for h in hours)
                     if hours else txn.ts.hour < 6 or txn.ts.hour >= 23)
     if unusual_hour:
-        add("UNUSUAL_HOUR", "Outside usual customer hours", 18)
-    if burst_count:
-        add("VELOCITY", "Multiple outgoing instructions within 60 seconds", 18)
+        add("UNUSUAL_HOUR", "Outside her usual payment hours", 18)
     known_payees = baseline.known_payees or {t.counterparty.iban for t in history}
-    if txn.counterparty.is_new and txn.counterparty.iban not in known_payees:
+    is_new_payee = txn.counterparty.is_new and txn.counterparty.iban not in known_payees
+    if burst_count and (txn.channel == "api" or is_new_payee):
+        add("VELOCITY", "Several payments within one minute", 13)
+    if is_new_payee:
         add("NEW_PAYEE", "First payment to payee", 16)
     known_clients = baseline.known_api_clients or {t.client_id for t in history}
     if txn.channel == "api" and txn.client_id not in known_clients:
-        add("NEW_API_CLIENT", "Unfamiliar API client", 10)
+        add("NEW_API_CLIENT", "Unfamiliar connected service", 10)
     known_devices = baseline.known_devices or {t.device_id for t in history}
     if txn.device_id not in known_devices and (known_devices or txn.channel == "api"):
         add("NEW_DEVICE", "Unfamiliar device", 8)
@@ -103,13 +104,13 @@ def score(txn: Txn, ctx: RiskContext) -> Risk:
     country_counts = Counter(t.counterparty.country for t in history)
     home_country = min(country_counts, key=lambda c: (-country_counts[c], c)) if country_counts else "AE"
     if txn.counterparty.offshore or txn.counterparty.country in OFFSHORE_COUNTRIES:
-        add("OFFSHORE", "Demo offshore destination", 15)
+        add("OFFSHORE", "High-risk offshore destination", 15)
     elif txn.counterparty.country != home_country:
-        add("CROSS_BORDER", "Destination outside usual customer country", 10)
+        add("CROSS_BORDER", "Destination outside her usual country", 10)
     if ctx.cumulative_drain > ctx.balance * 0.30:
-        add("BALANCE_DRAIN", "Over 30% of balance targeted", 14)
+        add("BALANCE_DRAIN", "Outgoing payments exceed 30% of her balance", 14)
     elif ctx.cumulative_drain > ctx.balance * 0.10:
-        add("BALANCE_DRAIN", "Over 10% of balance targeted", 7)
+        add("BALANCE_DRAIN", "Outgoing payments exceed 10% of her balance", 7)
 
     total = min(100, int(sum(f.weight for f in factors)))
     level = "critical" if total > 75 else "high" if total >= 60 else "medium" if total >= 40 else "low"

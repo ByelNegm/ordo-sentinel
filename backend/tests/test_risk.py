@@ -104,7 +104,7 @@ def test_cold_start_overnight_api_scores_and_levels():
     assert score(first, RiskContext(520000)).score == 52
     assert score(first, RiskContext(520000)).level == "medium"
     result = score(second, RiskContext(520000, 3000, [first]))
-    assert result.score == 70 and result.level == "high"
+    assert result.score == 65 and result.level == "high"
 
 
 @pytest.mark.parametrize("amount,weight", [(100, None), (200, 5), (10000, 25)])
@@ -147,13 +147,36 @@ def test_hour_habit_wraps_midnight_and_normalizes_timezone():
 def test_velocity_window_includes_held_and_blocked(seconds, active):
     history = [transaction(id="attempt", ts=NOW - timedelta(seconds=seconds),
                            status="blocked", decision="freeze")]
-    assert ("VELOCITY" in factors(transaction(), history)) == active
+    assert ("VELOCITY" in factors(transaction(channel="api"), history)) == active
 
 
 def test_velocity_excludes_self_and_credits_and_deduplicates():
-    assert "VELOCITY" not in factors(transaction(), [transaction(), transaction(id="credit", direction="in")])
+    assert "VELOCITY" not in factors(transaction(channel="api"), [transaction(), transaction(id="credit", direction="in")])
     old = transaction(id="old", ts=NOW - timedelta(seconds=1))
-    assert factors(transaction(), [old, old])["VELOCITY"] == 18
+    assert factors(transaction(channel="api"), [old, old])["VELOCITY"] == 13
+
+
+def test_same_timestamp_small_daytime_card_payments_to_known_payees_have_no_velocity():
+    previous = transaction(id="groceries_1", channel="card", amount=25)
+    candidate = transaction(id="groceries_2", channel="card", amount=30)
+    candidate.counterparty.iban = "AE002"
+    assert "VELOCITY" not in factors(candidate, [previous])
+
+
+def test_new_payee_app_payment_is_velocity_eligible():
+    previous = transaction(id="previous", ts=NOW - timedelta(seconds=1))
+    candidate = transaction()
+    candidate.counterparty.is_new = True
+    candidate.counterparty.iban = "AE002"
+    assert factors(candidate, [previous])["VELOCITY"] == 13
+
+
+def test_amount_and_offshore_labels_are_customer_friendly():
+    wire = Bank().catalog[-1]
+    result = score(wire, RiskContext(520000, 453000, baseline()))
+    labels = {factor.code: factor.label for factor in result.factors}
+    assert labels["AMOUNT_ZSCORE"] == "Far larger than her usual payments"
+    assert labels["OFFSHORE"] == "High-risk offshore destination"
 
 
 def test_new_payee_uses_customer_history():
