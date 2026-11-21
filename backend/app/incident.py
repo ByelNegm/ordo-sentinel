@@ -381,12 +381,12 @@ class IncidentCoordinator:
                 await self._change(incident, "validating", "recovery.proposed", incident.proposal.description)
             await asyncio.sleep(self.step_delay)
             async with self.lock:
-                incident.sandbox = self.sandbox(incident)
+                local = self.sandbox(incident)
                 payload = self.validation_payload(incident) if self.validator else None
             if self.validator:
-                validated = await self.validator.validate(payload, incident.sandbox)
+                validated = await self.validator.validate(payload, local)
             else:
-                validated = incident.sandbox
+                validated = local
             async with self.lock:
                 incident.sandbox = validated
                 if validated.runner == "daytona":

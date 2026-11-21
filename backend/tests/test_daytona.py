@@ -135,6 +135,7 @@ def test_warming_up_falls_back_and_reset_cancels_remote_wait(monkeypatch):
         await runtime.submit_payment()
         await asyncio.wait_for(started.wait(), timeout=1)
         assert not runtime.lock.locked()
+        assert next(iter(runtime.coordinator.incidents.values())).sandbox is None
         await asyncio.wait_for(runtime.reset(), timeout=1)
         assert not runtime.coordinator.incidents
         runtime.validator.ready = False
