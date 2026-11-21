@@ -47,6 +47,12 @@ class Ledger:
         if entry.kind == "settlement":
             if entry.event_id is None or entry.corrects_entry_id is not None:
                 raise ValueError("Settlement must reference an event, not a correction")
+        elif entry.corrects_entry_id is None:
+            if entry.event_id is not None or any(
+                e.kind == "compensation" and e.corrects_entry_id is None
+                and e.instruction_id == entry.instruction_id for e in self._entries
+            ):
+                raise ValueError("Replacement effect must be unique and have no event")
         else:
             original = next((e for e in self._entries if e.id == entry.corrects_entry_id), None)
             if (original is None or original.kind != "settlement"

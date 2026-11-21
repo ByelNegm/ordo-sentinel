@@ -8,7 +8,7 @@ from app.main import create_app
 
 @pytest.fixture
 def client():
-    with TestClient(create_app(traffic_interval=0.02, step_delay=0)) as client:
+    with TestClient(create_app(traffic_interval=0.02, step_delay=0, missing_grace=0)) as client:
         yield client
 
 

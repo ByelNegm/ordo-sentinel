@@ -4,7 +4,8 @@ from copy import deepcopy
 
 from .bank import Bank
 from .bus import EventBus
-from .integrity import extra_postings, inspect
+from .integrity import (extra_postings, inspect, intent_lines, restored_instructions,
+                        tampered_postings)
 from .ledger import reversed_lines
 from .models import (Approval, AuditAppended, AuditRecord, Containment, Incident,
                      IncidentUpdated, IntegrityUpdated, JournalEntry, Lineage, Proposal,
@@ -14,6 +15,8 @@ from .settlement import SettlementService
 
 APPROVERS = {"ops.lead@bank", "treasury@bank"}
 AGENT = "blackbox-agent"
+OPEN_STATUSES = {"detected", "investigating", "contained", "validating",
+                 "awaiting_approval", "correcting"}
 
 
 class ActionError(Exception):
@@ -52,27 +55,65 @@ class IncidentCoordinator:
 
     def observe_post(self, event: SettlementEvent, entry: JournalEntry) -> list:
         """Called synchronously after EVERY append, including the faulty retry."""
-        report = inspect(self.bank.ledger, self.bank.instructions, self.bank.events)
-        emitted = [
+        return [
             SettlementPosted(ts=event.ts, data=PostedSettlement(event=event, entry=entry)),
             self.record(event.service, "settlement.posted", entry.id,
                         f"Instruction {event.instruction_id}; event {event.id}"),
-            IntegrityUpdated(ts=report.ts, data=report),
-        ]
+        ] + self.observe_integrity()
+
+    def observe_integrity(self) -> list:
+        report = inspect(self.bank.ledger, self.bank.instructions, self.bank.events)
+        emitted = [IntegrityUpdated(ts=report.ts, data=report)]
         if report.status == "healthy":
             return emitted
-        current = next((i for i in self.incidents.values() if i.status != "resolved"), None)
-        extras = extra_postings(self.bank.ledger)
+        current = next((i for i in self.incidents.values() if i.status in OPEN_STATUSES), None)
+        closed_payments = {identifier for incident in self.incidents.values()
+                           if incident.status not in OPEN_STATUSES
+                           for identifier in incident.affected_payments}
+        extras = [e for e in extra_postings(self.bank.ledger) if e.instruction_id not in closed_payments]
+        tampered = [e for e in tampered_postings(self.bank.ledger, self.bank.instructions, self.bank.events)
+                    if e.instruction_id not in closed_payments]
+        restored = restored_instructions(self.bank.ledger, self.bank.instructions)
+        missing = [i for i in self.bank.instructions.values()
+                   if i.status == "missing" and i.id not in restored and i.id not in closed_payments]
+        if tampered:
+            kind, postings = "tampered_settlement", tampered
+            affected = {e.instruction_id for e in postings}
+            impact = 0
+            for identifier in affected:
+                instruction = self.bank.instructions[identifier]
+                delta = {}
+                for line in [l.model_dump() for e in postings if e.instruction_id == identifier
+                             for l in e.lines]:
+                    delta[line["account"]] = delta.get(line["account"], 0) + (
+                        line["amount_minor"] if line["side"] == "credit" else -line["amount_minor"])
+                for line in intent_lines(instruction):
+                    delta[line["account"]] = delta.get(line["account"], 0) - (
+                        line["amount_minor"] if line["side"] == "credit" else -line["amount_minor"])
+                impact += sum(abs(value) for value in delta.values()) // 2
+        elif extras:
+            kind, postings = "duplicate_settlement", extras
+            affected = {e.instruction_id for e in postings}
+            impact = sum(l.amount_minor for e in postings for l in e.lines if l.side == "debit")
+        elif missing:
+            kind, postings = "missing_settlement", []
+            affected = {i.id for i in missing}
+            impact = sum(i.amount_minor for i in missing)
+        else:
+            return emitted
+        accounts = {l.account for e in postings for l in e.lines}
+        accounts.update(account for identifier in affected
+                        for account in (self.bank.instructions[identifier].debtor,
+                                        self.bank.instructions[identifier].creditor))
         if current is None:
             now = utcnow()
             identifier = f"incident-{len(self.incidents) + 1:04}"
             current = Incident(
-                id=identifier, type="duplicate_settlement", status="detected", detected_at=now,
+                id=identifier, type=kind, status="detected", detected_at=now,
                 violations=[check for check in report.checks if not check.passed],
-                affected_payments=sorted({e.instruction_id for e in extras}),
-                affected_accounts=sorted({line.account for e in extras for line in e.lines}),
-                impact_minor=sum(sum(l.amount_minor for l in e.lines if l.side == "debit") for e in extras),
-                root_cause=RootCause(service=event.service, summary="Deterministic investigation pending",
+                affected_payments=sorted(affected), affected_accounts=sorted(accounts),
+                impact_minor=impact,
+                root_cause=RootCause(service=self.settlement.service.id, summary="Deterministic investigation pending",
                                      confidence="low", method="deterministic"),
                 lineage=[], timeline=[TimelineItem(ts=now, kind="detection", ref=identifier,
                                                   detail="Independent intent and ledger effects disagree")],
@@ -84,10 +125,9 @@ class IncidentCoordinator:
             emitted.append(self.record(AGENT, "incident.detected", identifier,
                                        ", ".join(c.name for c in current.violations)))
         else:
-            current.affected_payments = sorted({e.instruction_id for e in extras})
-            current.affected_accounts = sorted({line.account for e in extras for line in e.lines})
-            current.impact_minor = sum(
-                sum(l.amount_minor for l in e.lines if l.side == "debit") for e in extras)
+            current.affected_payments = sorted(affected)
+            current.affected_accounts = sorted(accounts)
+            current.impact_minor = impact
             if current.status == "investigating":
                 self._investigate(current)
         emitted.append(IncidentUpdated(ts=utcnow(), data=current.model_copy(deep=True)))
@@ -109,12 +149,26 @@ class IncidentCoordinator:
             timeline.extend(TimelineItem(ts=e.ts, kind="posting", ref=e.id,
                                          detail="Balanced ledger effect") for e in postings)
             services.update(e.service for e in events)
-            summaries.append(f"Events {', '.join(e.id for e in events)} share instruction {identifier} "
-                             f"and idempotency key {instruction.idempotency_key}")
+            if incident.type == "missing_settlement":
+                services.add(self.settlement.service.id)
+                summaries.append(f"{self.settlement.service.id} acknowledged instruction {identifier} "
+                                 "but no event or posting exists after the grace window")
+            elif incident.type == "tampered_settlement":
+                for event in events:
+                    differences = [
+                        f"{field}: expected {getattr(instruction, field)}, observed {getattr(event, field)}"
+                        for field in ("debtor", "creditor", "amount_minor")
+                        if getattr(event, field) != getattr(instruction, field)
+                    ]
+                    if differences:
+                        summaries.append(f"{event.service} altered event {event.id}: " + "; ".join(differences))
+            else:
+                summaries.append(f"Events {', '.join(e.id for e in events)} share instruction {identifier} "
+                                 f"and idempotency key {instruction.idempotency_key}; retry bypassed deduplication")
         incident.lineage = lineage
         service = next(iter(services)) if len(services) == 1 else "settlement-svc"
         incident.root_cause = RootCause(
-            service=service, summary="; ".join(summaries) + f"; emitted by {service} (retry bypassed deduplication).",
+            service=service, summary="; ".join(summaries) + f"; responsible service {service}.",
             confidence="high" if len(services) == 1 else "medium", method="deterministic",
         )
         detection = next(t for t in incident.timeline if t.kind == "detection")
@@ -123,16 +177,31 @@ class IncidentCoordinator:
                                               detail=incident.root_cause.summary))
 
     def propose(self, incident: Incident) -> Proposal:
+        originals = (tampered_postings(self.bank.ledger, self.bank.instructions, self.bank.events)
+                     if incident.type == "tampered_settlement" else extra_postings(self.bank.ledger)
+                     if incident.type == "duplicate_settlement" else [])
         entries = [
             JournalEntry(id=f"correction-{incident.id}-{original.id}", kind="compensation",
                          instruction_id=original.instruction_id, event_id=None,
                          corrects_entry_id=original.id, lines=reversed_lines(original),
                          ts=utcnow(), actor=AGENT)
-            for original in extra_postings(self.bank.ledger)
+            for original in originals
             if original.instruction_id in incident.affected_payments
         ]
+        if incident.type in {"missing_settlement", "tampered_settlement"}:
+            entries.extend(
+                JournalEntry(id=f"correction-{incident.id}-intent-{identifier}", kind="compensation",
+                             instruction_id=identifier, event_id=None, corrects_entry_id=None,
+                             lines=intent_lines(self.bank.instructions[identifier]), ts=utcnow(), actor=AGENT)
+                for identifier in incident.affected_payments
+            )
         return Proposal(id=f"proposal-{incident.id}",
-                        description="Reverse each extra posting; preserve every original entry.", entries=entries)
+                        description="Restore independent payment intent; preserve every original entry and event.",
+                        entries=entries)
+
+    @staticmethod
+    def correction_key(incident: Incident, entry: JournalEntry) -> str:
+        return f"{incident.id}:{entry.corrects_entry_id or 'intent:' + entry.instruction_id}"
 
     def sandbox(self, incident: Incident) -> SandboxReport:
         """Deep-copy all financial evidence. Invalid proposals never touch the real ledger."""
@@ -146,15 +215,17 @@ class IncidentCoordinator:
             if incident.proposal is None:
                 raise ValueError("Proposal missing")
             proposal = Proposal.model_validate(incident.proposal.model_dump())
-            extras = {e.id for e in extra_postings(ledger)
-                      if e.instruction_id in incident.affected_payments}
-            references = [e.corrects_entry_id for e in proposal.entries]
-            if not extras or len(references) != len(set(references)) or set(references) != extras:
-                raise ValueError("Proposal must reverse every extra posting exactly once")
+            expected = self.propose(incident)
+            def signature(entry):
+                return entry.model_dump(exclude={"ts", "actor"})
+            if not proposal.entries or [signature(e) for e in proposal.entries] != [
+                signature(e) for e in expected.entries
+            ]:
+                raise ValueError("Proposal must exactly restore the affected instruction effects")
             for entry in proposal.entries:
                 if entry.kind != "compensation":
                     raise ValueError("Proposal can only append compensation")
-                ledger.append(entry, f"{incident.id}:{entry.corrects_entry_id}")
+                ledger.append(entry, self.correction_key(incident, entry))
         except (ValueError, TypeError, KeyError):
             valid = False
         after = inspect(ledger, instructions, events)
@@ -233,13 +304,20 @@ class IncidentCoordinator:
         await self.bus.publish(self.record(actor, "recovery.approved", identifier, "Sandbox revalidated"))
         await self.bus.publish(IncidentUpdated(ts=now, data=incident.model_copy(deep=True)))
         batch = [(entry.model_copy(update={"actor": actor, "ts": utcnow()}, deep=True),
-                  f"{identifier}:{entry.corrects_entry_id}") for entry in incident.proposal.entries]
-        applied = self.bank.ledger.append_batch(batch)
+                  self.correction_key(incident, entry)) for entry in incident.proposal.entries]
+        try:
+            applied = self.bank.ledger.append_batch(batch)
+        except Exception as error:
+            incident.status = "failed"
+            await self.bus.publish(self.record(actor, "recovery.failed", identifier, str(error)))
+            await self.bus.publish(IncidentUpdated(ts=utcnow(), data=incident.model_copy(deep=True)))
+            raise ActionError(409, "Correction batch failed; incident marked failed") from error
         incident.corrections = [entry.id for entry in applied]
         for entry in applied:
             incident.timeline.append(TimelineItem(ts=entry.ts, kind="correction", ref=entry.id,
                                                    detail=f"Compensates {entry.corrects_entry_id}"))
-            await self.bus.publish(self.record(actor, "ledger.compensated", entry.id, entry.corrects_entry_id))
+            await self.bus.publish(self.record(actor, "ledger.compensated", entry.id,
+                                              entry.corrects_entry_id or f"Restores {entry.instruction_id}"))
         for payment_id in incident.affected_payments:
             self.bank.instructions[payment_id].status = "settled"
         for lineage in incident.lineage:

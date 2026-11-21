@@ -1,5 +1,5 @@
 # BLACKBOX — bank integrity recovery
-**Team ordo_system · P0: duplicate settlement.** Ordo Sentinel is discontinued; its modules, tests and fixtures are preserved under [legacy/ordo_sentinel](legacy/ordo_sentinel/).
+**Team ordo_system · Duplicate, missing and tampered settlement recovery.** Ordo Sentinel is discontinued; its modules, tests and fixtures are preserved under [legacy/ordo_sentinel](legacy/ordo_sentinel/).
 
 Track: **Protect the Big Guy — Code, Data & Infrastructure Rails**.
 
@@ -44,14 +44,17 @@ curl -X POST http://localhost:8000/api/services/settlement-svc/release
 curl http://localhost:8000/api/integrity
 curl -X POST http://localhost:8000/api/traffic/stop
 ```
-Every reset restores 12 account identities and 100 normally settled instructions. Live payments arrive about every 1.5s. A duplicate emits a fresh event and posts twice through a deliberately faulty retry path. Both entries balance, while single_financial_effect and ledger_matches_expected fail. Missing/tamper fault injection returns 501 (P2).
+Every reset restores 12 account identities and 100 normally settled instructions. Live payments arrive about every 1.5s. A duplicate emits a fresh event and posts twice through a deliberately faulty retry path. Both entries balance, while single_financial_effect and ledger_matches_expected fail.
+
+For P2, replace faults/duplicate with faults/missing or faults/tamper, resetting before each run. Missing acknowledges the instruction before losing its event and posting; a watchdog marks it missing after a 3s grace window, even if traffic stops. Allow roughly 7–9s for missing to reach awaiting_approval at default timings. Tamper increases the event amount by 100 fils and posts that altered effect. Its root cause names the differing amount_minor field. Both follow the same containment, sandbox, approval and release lifecycle.
 
 ## Financial / recovery invariants
 - Money is strict integer fils everywhere; 100 fils = AED 1. Negative derived account balances are allowed in this synthetic accounting demo; this is not a credit/funds-availability engine.
 - Account balances come only from journal lines (credits minus debits). Instruction intent is stored separately. Canonical hash input is UTF-8 id|debtor|creditor|amount_minor, SHA-256.
-- The journal exposes append-only operations and detached snapshots. Compensation reverses an extra posting and links corrects_entry_id; originals remain unchanged.
-- The pipeline investigates → contains → proposes → sandboxes → awaits approval. Default step delay is 1s; create_app(step_delay=0, traffic_interval=...) supports tests.
+- The journal exposes append-only operations and detached snapshots. Compensation reverses a bad posting and links corrects_entry_id; originals remain unchanged. Missing effects and tamper replacements use compensation with corrects_entry_id null, linked by instruction_id. Original events remain as evidence; event_integrity recognizes a tampered event as reconciled only after its effect is reversed and a correct replacement is present.
+- The pipeline investigates → contains → proposes → sandboxes → awaits approval. Default step delay is 1s; create_app(step_delay=0, traffic_interval=..., missing_grace=0) supports tests.
 - Only ops.lead@bank or treasury@bank may approve; blackbox-agent is always forbidden. Actor strings are a demo authorization gate, not authenticated identities.
 - Approval revalidates the sandbox under the runtime lock and appends an atomic correction batch keyed by incident + original entry. Repeat approval does not append again.
-- Release requires resolved incidents. Reset cancels traffic and every pipeline under the same lock before constructing a new deterministic seed.
+- Release requires no open incidents. Rejection permits release without repairing the acknowledged violation; a later fault opens a new incident. Reset cancels traffic, the missing-write watchdog and every pipeline under the same lock before constructing a new deterministic seed.
+- Read limits must be between 1 and 500 (otherwise 422).
 - SSE uses named event/data frames, 15s idle comment heartbeats and no buffering/cache. No durable replay: refetch overview on reconnect/reset.

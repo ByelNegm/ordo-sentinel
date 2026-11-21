@@ -16,8 +16,9 @@ from .traffic import Runtime
 HEARTBEAT_SECONDS = 15
 
 
-def create_app(*, traffic_interval: float = 1.5, step_delay: float = 1.0) -> FastAPI:
-    runtime = Runtime(traffic_interval, step_delay)
+def create_app(*, traffic_interval: float = 1.5, step_delay: float = 1.0,
+               missing_grace: float = 3.0) -> FastAPI:
+    runtime = Runtime(traffic_interval, step_delay, missing_grace)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -40,17 +41,17 @@ def create_app(*, traffic_interval: float = 1.5, step_delay: float = 1.0) -> Fas
             return runtime.overview()
 
     @app.get("/api/payments", response_model=list[PaymentInstruction])
-    async def payments(limit: int = Query(50, ge=1)):
+    async def payments(limit: int = Query(50, ge=1, le=500)):
         async with runtime.lock:
             return list(reversed(list(runtime.bank.instructions.values())))[:limit]
 
     @app.get("/api/settlements", response_model=list[SettlementEvent])
-    async def settlements(limit: int = Query(50, ge=1)):
+    async def settlements(limit: int = Query(50, ge=1, le=500)):
         async with runtime.lock:
             return list(reversed(runtime.bank.events))[:limit]
 
     @app.get("/api/ledger", response_model=list[JournalEntry])
-    async def ledger(limit: int = Query(100, ge=1)):
+    async def ledger(limit: int = Query(100, ge=1, le=500)):
         async with runtime.lock:
             return list(reversed(runtime.bank.ledger.entries))[:limit]
 
@@ -70,7 +71,7 @@ def create_app(*, traffic_interval: float = 1.5, step_delay: float = 1.0) -> Fas
             return runtime.coordinator.get(identifier)
 
     @app.get("/api/audit", response_model=list[AuditRecord])
-    async def audit(limit: int = Query(100, ge=1)):
+    async def audit(limit: int = Query(100, ge=1, le=500)):
         async with runtime.lock:
             return list(reversed(runtime.coordinator.audit))[:limit]
 

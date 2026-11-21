@@ -30,9 +30,9 @@ Changes to this file need lead sign-off. The UI may only depend on the fields li
 - `POST /api/reset`: back to a healthy seeded bank (100 settled payments, balanced ledger, no incidents). Returns `Overview`.
 - `POST /api/traffic/start` / `POST /api/traffic/stop`: live payment trickle (one payment roughly every 1.5s). Returns `{ "running": bool }`.
 - `POST /api/faults/{kind}` with `kind` ∈ `duplicate | missing | tamper`: injects a real fault into `settlement-svc`. The next live payment is affected. Returns `{ "fault": kind, "service": "settlement-svc" }`. 409 if a fault is already active or the service is quarantined.
-- `POST /api/incidents/{id}/approve` with body `{ "actor": "ops.lead@bank" }`: authorizes the validated recovery. 403 if the actor is not an authorized approver (authorized: `ops.lead@bank`, `treasury@bank`; the agent `blackbox-agent` can never approve). 409 if the incident is not in `awaiting_approval`. Idempotent: a repeat returns the same incident unchanged.
-- `POST /api/incidents/{id}/reject` with body `{ "actor": "..." }`: rejects the proposal (status `rejected`).
-- `POST /api/services/settlement-svc/release`: lifts quarantine after the incident is `resolved`. Held instructions are then processed. 409 otherwise.
+- `POST /api/incidents/{id}/approve` with body `{ "actor": "ops.lead@bank" }`: authorizes the validated recovery. 403 if the actor is not an authorized approver (authorized: `ops.lead@bank`, `treasury@bank`; the agent `blackbox-agent` can never approve). 404 for an unknown incident id (after the authorization check). 409 if the incident is not in `awaiting_approval`. Idempotent: a repeat returns the same incident unchanged.
+- `POST /api/incidents/{id}/reject` with body `{ "actor": "..." }`: rejects the proposal (status `rejected`). 404 for an unknown incident id.
+- `POST /api/services/settlement-svc/release`: lifts quarantine when no incident is open (including after rejection). Open statuses are `detected`, `investigating`, `contained`, `validating`, `awaiting_approval` and `correcting`. Held instructions are then processed. 409 if an incident is open or the service is not quarantined. Rejection acknowledges rather than repairs a violation; integrity can remain violated after release.
 
 ## Shapes
 

@@ -30,6 +30,8 @@ def test_read_endpoints_and_frozen_shapes(client):
         assert 0 < len(rows) <= 2
         assert rows[0].id > rows[-1].id or len(rows) == 1
         assert client.get("/api/" + path + "?limit=0").status_code == 422
+        assert client.get("/api/" + path + "?limit=500").status_code == 200
+        assert client.get("/api/" + path + "?limit=501").status_code == 422
     healthy(client.get("/api/integrity").json())
 
 
@@ -57,11 +59,11 @@ def test_entire_p0_flow_three_times_from_clean_seed_via_http(client, run):
     assert len(incident["lineage"][0]["event_ids"]) == 2
     assert incident["sandbox"]["passed"]
     assert client.post("/api/services/settlement-svc/release").status_code == 409
-    before = client.get("/api/ledger?limit=1000").json()
+    before = client.get("/api/ledger?limit=500").json()
     for actor in ("blackbox-agent", "unauthorized@bank"):
         assert client.post("/api/incidents/" + identifier + "/approve",
                            json={"actor": actor}).status_code == 403
-    assert client.get("/api/ledger?limit=1000").json() == before
+    assert client.get("/api/ledger?limit=500").json() == before
     response = client.post("/api/incidents/" + identifier + "/approve",
                            json={"actor": "ops.lead@bank"})
     assert response.status_code == 200, response.text
@@ -70,7 +72,7 @@ def test_entire_p0_flow_three_times_from_clean_seed_via_http(client, run):
     assert resolved["approval"]["actor"] == "ops.lead@bank"
     assert len(resolved["corrections"]) == 1
     healthy(resolved["verification"])
-    after = client.get("/api/ledger?limit=1000").json()
+    after = client.get("/api/ledger?limit=500").json()
     assert len(after) == len(before) + 1
     assert after[1:] == before
     assert after[0]["corrects_entry_id"] in {e["id"] for e in before}
@@ -78,15 +80,15 @@ def test_entire_p0_flow_three_times_from_clean_seed_via_http(client, run):
     again = client.post("/api/incidents/" + identifier + "/approve",
                         json={"actor": "treasury@bank"})
     assert again.json() == resolved
-    assert client.get("/api/ledger?limit=1000").json() == after
+    assert client.get("/api/ledger?limit=500").json() == after
     assert client.post("/api/incidents/" + identifier + "/approve",
                        json={"actor": "blackbox-agent"}).status_code == 403
     assert client.post("/api/services/settlement-svc/release").json()["status"] == "running"
     assert client.get("/api/overview").json()["volume"]["held"] == 0
     healthy(client.get("/api/integrity").json())
-    payments = client.get("/api/payments?limit=1000").json()
+    payments = client.get("/api/payments?limit=500").json()
     assert all(p["status"] == "settled" for p in payments)
-    audit = client.get("/api/audit?limit=1000").json()
+    audit = client.get("/api/audit?limit=500").json()
     actions = {record["action"] for record in audit}
     assert {"fault.injected", "incident.detected", "service.quarantined", "recovery.proposed",
             "sandbox.completed", "approval.denied", "recovery.approved", "ledger.compensated",
@@ -97,30 +99,31 @@ def test_entire_p0_flow_three_times_from_clean_seed_via_http(client, run):
     healthy(client.get("/api/integrity").json())
 
 
-def test_fault_hooks_and_conflicts(client):
-    for fault in ("missing", "tamper"):
-        assert client.post("/api/faults/" + fault).status_code == 501
-    assert client.get("/api/overview").json()["services"][0]["fault"] is None
+@pytest.mark.parametrize("kind", ["duplicate", "missing", "tamper"])
+def test_fault_modes_and_conflicts(client, kind):
     assert client.post("/api/faults/unknown").status_code == 422
-    assert client.post("/api/faults/duplicate").status_code == 200
-    assert client.post("/api/faults/duplicate").status_code == 409
+    assert client.post("/api/faults/" + kind).status_code == 200
+    assert client.post("/api/faults/" + kind).status_code == 409
     client.post("/api/reset")
     duplicate_via_http(client)
-    assert client.post("/api/faults/duplicate").status_code == 409
+    assert client.post("/api/faults/" + kind).status_code == 409
 
 
-def test_reject_keeps_service_quarantined_and_cannot_approve(client):
+def test_reject_cannot_approve_but_can_release_held_payments(client):
     incident = duplicate_via_http(client)
     identifier = incident["id"]
-    before = client.get("/api/ledger?limit=1000").json()
+    before = client.get("/api/ledger?limit=500").json()
     response = client.post("/api/incidents/" + identifier + "/reject",
                            json={"actor": "ops.lead@bank"})
     assert response.status_code == 200 and response.json()["status"] == "rejected"
     assert client.post("/api/incidents/" + identifier + "/approve",
                        json={"actor": "ops.lead@bank"}).status_code == 409
-    assert client.post("/api/services/settlement-svc/release").status_code == 409
-    assert client.get("/api/ledger?limit=1000").json() == before
-    assert client.get("/api/overview").json()["services"][0]["status"] == "quarantined"
+    assert client.get("/api/ledger?limit=500").json() == before
+    held = client.get("/api/overview").json()["volume"]["held"]
+    assert client.post("/api/services/settlement-svc/release").status_code == 200
+    assert client.get("/api/ledger?limit=500").json()[held:] == before
+    assert client.get("/api/overview").json()["services"][0]["status"] == "running"
+    assert client.get("/api/overview").json()["open_incidents"] == 0
 
 
 def test_approval_state_and_body_validation(client):
@@ -139,6 +142,8 @@ def test_approval_state_and_body_validation(client):
                        json={"actor": "ops.lead@bank"}).status_code == 404
     assert client.post("/api/incidents/missing/approve",
                        json={"actor": "blackbox-agent"}).status_code == 403
+    assert client.post("/api/incidents/missing/reject",
+                       json={"actor": "ops.lead@bank"}).status_code == 404
 
 
 def test_invalid_proposal_rejected_through_http_with_byte_identical_ledger(client):

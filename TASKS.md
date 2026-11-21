@@ -7,13 +7,14 @@ Owners: **Devin** = backend/lead, **UI** = colleague's Devin session. Times are 
 - [x] GOAL / TASKS / PROGRESS / README rewritten (Devin)
 
 ## M1 — Backend P0, duplicate settlement (→14:30, Devin)
-- [x] Models, ledger, bank seed (100 payments), settlement-svc duplicate fault + P2 hooks (501)
+- [x] Models, ledger, bank seed (100 payments), settlement-svc with all three fault modes
 - [x] 7 integrity checks + reconciliation
 - [x] Incident pipeline: investigate → contain → propose → sandbox → awaiting_approval
 - [x] Approval gate (403/409), idempotent compensation, verification, release
 - [x] Traffic trickle, reset, SSE, audit log
-- [x] pytest suite green (33 tests); full HTTP flow 3× from clean seeds + live curl flow 1×
-- [ ] Independent review gate pass
+- [x] pytest suite green (46 tests); P0 HTTP flow 3× + each P2 HTTP flow; live curl flow for all three kinds from reset
+- [x] Independent P0 review gate pass (6e21285, reviewer verdict PASS)
+- [x] Review follow-ups: closed-incident handling/release, append failure audit, limit ≤500, unknown-id contract clarification
 
 ## M2 — UI (→14:45, UI)
 - [ ] Shell, status bar, SSE hook, mock mode
@@ -22,7 +23,7 @@ Owners: **Devin** = backend/lead, **UI** = colleague's Devin session. Times are 
 - [ ] Acceptance flow 3× against the live backend
 
 ## M3 — P2 scenarios (14:30–15:00, Devin)
-- [ ] Missing settlement · Tampered settlement (detection + recovery)
+- [x] Missing settlement · Tampered settlement (detection + recovery)
 
 ## M4 — Ship (15:00–16:00, Team)
 - [ ] Feature freeze 15:00; e2e demo runs ×3

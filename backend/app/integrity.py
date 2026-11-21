@@ -3,7 +3,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 
 from .bank import canonical_hash
-from .ledger import Ledger
+from .ledger import Ledger, line_signature
 from .models import Check, IntegrityReport, PaymentInstruction, SettlementEvent, utcnow
 
 Instructions = Mapping[str, PaymentInstruction]
@@ -54,13 +54,46 @@ def extra_postings(ledger: Ledger) -> list:
     return extras
 
 
+def intent_lines(instruction: PaymentInstruction) -> list[dict]:
+    return [{"account": instruction.debtor, "side": "debit", "amount_minor": instruction.amount_minor},
+            {"account": instruction.creditor, "side": "credit", "amount_minor": instruction.amount_minor}]
+
+
+def restored_instructions(ledger: Ledger, instructions: Instructions) -> set[str]:
+    return {e.instruction_id for e in ledger.entries
+            if e.kind == "compensation" and e.corrects_entry_id is None
+            and e.instruction_id in instructions
+            and line_signature(e) == Counter((l["account"], l["side"], l["amount_minor"])
+                                             for l in intent_lines(instructions[e.instruction_id]))}
+
+
+def invalid_event(event: SettlementEvent, instructions: Instructions) -> bool:
+    instruction = instructions.get(event.instruction_id)
+    return (instruction is None or event.payload_hash != instruction.expected_hash
+            or event.payload_hash != canonical_hash(event.instruction_id, event.debtor,
+                                                     event.creditor, event.amount_minor)
+            or instruction.expected_hash != canonical_hash(instruction.id, instruction.debtor,
+                                                           instruction.creditor, instruction.amount_minor))
+
+
+def tampered_postings(ledger: Ledger, instructions: Instructions,
+                      events: Sequence[SettlementEvent]) -> list:
+    invalid = {event.id for event in events if invalid_event(event, instructions)}
+    corrected = {e.corrects_entry_id for e in ledger.entries if e.kind == "compensation"}
+    return [e for e in ledger.entries if e.kind == "settlement"
+            and e.event_id in invalid and e.id not in corrected]
+
+
 def single_financial_effect(ledger: Ledger, instructions: Instructions) -> Check:
     entries = ledger.entries
     corrected = {e.corrects_entry_id for e in entries if e.kind == "compensation"}
-    counts = Counter(e.instruction_id for e in entries
-                     if e.kind == "settlement" and e.id not in corrected)
+    counts = Counter(e.instruction_id for e in entries if
+                     (e.kind == "settlement" and e.id not in corrected)
+                     or (e.kind == "compensation" and e.corrects_entry_id is None))
+    restored = restored_instructions(ledger, instructions)
     wrong = [i.id for i in instructions.values()
-             if counts[i.id] != (0 if i.status in {"accepted", "held"} else 1)]
+             if counts[i.id] != (0 if i.status in {"accepted", "held"}
+                                or (i.status == "missing" and i.id not in restored) else 1)]
     passed = not wrong and not (set(counts) - set(instructions))
     return _check("single_financial_effect", passed,
                   "Exactly one net ledger effect per settled instruction" if passed else
@@ -84,26 +117,32 @@ def ledger_matches_expected(ledger: Ledger, instructions: Instructions) -> Check
                   "Balance mismatch: " + ", ".join(wrong))
 
 
-def no_missing_settlements(instructions: Instructions, events: Sequence[SettlementEvent]) -> Check:
+def no_missing_settlements(instructions: Instructions, events: Sequence[SettlementEvent],
+                          ledger: Ledger | None = None) -> Check:
     settled = {e.instruction_id for e in events}
+    if ledger is not None:
+        settled |= restored_instructions(ledger, instructions)
     missing = [i.id for i in instructions.values()
                if i.status not in {"accepted", "held"} and i.id not in settled]
     return _check("no_missing_settlements", not missing,
                   "No due instructions lack settlement evidence" if not missing else ", ".join(missing))
 
 
-def event_integrity(instructions: Instructions, events: Sequence[SettlementEvent]) -> Check:
+def event_integrity(instructions: Instructions, events: Sequence[SettlementEvent],
+                    ledger: Ledger | None = None) -> Check:
     invalid = []
+    entries = ledger.entries if ledger is not None else ()
+    corrected = {e.corrects_entry_id for e in entries if e.kind == "compensation"}
+    restored = restored_instructions(ledger, instructions) if ledger is not None else set()
     for event in events:
-        instruction = instructions.get(event.instruction_id)
-        if (instruction is None or event.payload_hash != instruction.expected_hash
-                or event.payload_hash != canonical_hash(event.instruction_id, event.debtor,
-                                                         event.creditor, event.amount_minor)
-                or instruction.expected_hash != canonical_hash(instruction.id, instruction.debtor,
-                                                               instruction.creditor, instruction.amount_minor)):
+        postings = [e for e in entries if e.event_id == event.id and e.kind == "settlement"]
+        recovered = (event.instruction_id in restored and bool(postings)
+                     and all(e.id in corrected for e in postings))
+        if invalid_event(event, instructions) and not recovered:
             invalid.append(event.id)
     return _check("event_integrity", not invalid,
-                  "Event payload hashes match independent intent" if not invalid else ", ".join(invalid))
+                  "Events match intent or have reversed effects and a correct replacement"
+                  if not invalid else ", ".join(invalid))
 
 
 def inspect(ledger: Ledger, instructions: Instructions,
@@ -114,8 +153,8 @@ def inspect(ledger: Ledger, instructions: Instructions,
         settlements_map_to_instructions(ledger, instructions, events),
         single_financial_effect(ledger, instructions),
         ledger_matches_expected(ledger, instructions),
-        no_missing_settlements(instructions, events),
-        event_integrity(instructions, events),
+        no_missing_settlements(instructions, events, ledger),
+        event_integrity(instructions, events, ledger),
     ]
     return IntegrityReport(status="healthy" if all(c.passed for c in checks) else "violated",
                            checks=checks, ts=utcnow())
