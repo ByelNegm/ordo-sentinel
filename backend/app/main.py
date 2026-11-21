@@ -23,8 +23,11 @@ def create_app(*, traffic_interval: float = 1.5, step_delay: float = 1.0,
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        yield
-        await runtime.stop()
+        runtime.validator.start()
+        try:
+            yield
+        finally:
+            await runtime.stop()
 
     app = FastAPI(title="BLACKBOX", lifespan=lifespan)
     app.state.runtime = runtime

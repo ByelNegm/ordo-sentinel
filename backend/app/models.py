@@ -133,6 +133,10 @@ class SandboxReport(Model):
     balances_before: dict[str, StrictInt]
     balances_after: dict[str, StrictInt]
     ts: datetime
+    runner: Literal["daytona", "local"] = "local"
+    runner_id: str | None = None
+    remote_match: bool | None = None
+    runner_note: str | None = None
 
 
 class SandboxChallengeRequest(Model):

@@ -109,6 +109,10 @@ type Incident = {
     checks_before: Check[]; checks_after: Check[];
     balances_before: Record<string, number>; balances_after: Record<string, number>;
     ts: string;
+    runner?: "daytona" | "local";
+    runner_id?: string | null;
+    remote_match?: boolean | null;
+    runner_note?: string | null;
   } | null;
   approval: { actor: string; at: string } | null;
   corrections: string[];             // applied compensation entry ids
@@ -117,6 +121,22 @@ type Incident = {
 
 type AuditRecord = { id: string; ts: string; actor: string; action: string; ref: string | null; detail: string };
 ```
+
+### Optional Daytona confirmation
+
+When DAYTONA_API_KEY is set and BLACKBOX_DAYTONA is not "0", startup pre-warms
+one private sandbox using Daytona Python SDK 2.x's v0 namespace (v0-sdk extra).
+Only detached synthetic evidence, the proposal/canonical expected proposal and
+the pure checker modules are sent; no credentials or live ledger handles are uploaded.
+Validation waits at most 8 seconds, outside the runtime lock. Not-ready, error,
+timeout, invalid JSON and disagreement all retain the authoritative local report
+and explain the fallback in runner_note. remote_match=false means disagreement;
+null means no remote comparison completed. A matching result records runner=daytona,
+runner_id and remote_match=true, plus sandbox.daytona.validated / audit.appended
+and a sandbox timeline item "Validated in Daytona sandbox <id>".
+Reset reuses the pre-warmed sandbox; shutdown deletes it. Idle/TTL deletion also
+limits resources after an ungraceful exit. Challenges remain local. Human approval
+always repeats local validation; Daytona never authorizes or applies a live correction.
 
 ## SSE `GET /api/stream`
 
