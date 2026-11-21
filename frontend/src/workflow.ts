@@ -11,8 +11,8 @@ export const workflowSteps = [
 
 export function deriveWorkflow(overview: Overview | null, incident?: Incident) {
   if (!overview) return { index: -1, section: 'bank', target: '', action: 'Connecting to backend', caption: 'Waiting for live bank state' }
-  if (incident && ['failed', 'rejected'].includes(incident.status) && overview.integrity.status !== 'healthy') {
-    return { index: 2, section: 'simulator', target: '[data-action="reset"]', action: 'Reset baseline', caption: 'Recovery was not applied. Reset before starting another fault.' }
+  if (incident && ['failed', 'rejected'].includes(incident.status)) {
+    return { index: workflowSteps.length, terminal: incident.status, section: 'simulator', target: '[data-action="reset"]', action: 'Reset baseline', caption: 'Reset the bank to start again' }
   }
   if (incident?.status === 'resolved' && incident.verification?.checks.length === 7 && incident.verification.checks.every(check => check.pass)) {
     const quarantined = overview.services[0]?.status === 'quarantined'
