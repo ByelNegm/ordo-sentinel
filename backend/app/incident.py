@@ -2,14 +2,14 @@
 import asyncio
 from copy import deepcopy
 
-from .bank import Bank
+from .bank import Bank, money_text
 from .bus import EventBus
 from .integrity import (extra_postings, inspect, intent_lines, restored_instructions,
                         tampered_postings)
 from .ledger import reversed_lines
 from .models import (Approval, AuditAppended, AuditRecord, Containment, Incident,
                      IncidentUpdated, IntegrityUpdated, JournalEntry, Lineage, Proposal,
-                     RootCause, SandboxChallengeResponse, SandboxReport, ServiceUpdated, SettlementEvent,
+                     RejectionReason, RootCause, SandboxChallengeResponse, SandboxReport, ServiceUpdated, SettlementEvent,
                      SettlementPosted, PostedSettlement, TimelineItem, utcnow)
 from .settlement import SettlementService
 
@@ -130,14 +130,35 @@ class IncidentCoordinator:
             current.impact_minor = impact
             if current.status == "investigating":
                 self._investigate(current)
+        current.summary_text = self.summary_text(current)
         emitted.append(IncidentUpdated(ts=utcnow(), data=current.model_copy(deep=True)))
         return emitted
+
+    def summary_text(self, incident: Incident) -> str:
+        summaries = []
+        for identifier in incident.affected_payments:
+            instruction = self.bank.instructions[identifier]
+            title = (f"Payment {instruction.reference} ({money_text(instruction.amount_minor)}, "
+                     f"{instruction.purpose_label}) from {instruction.debtor_name} to {instruction.creditor_name}")
+            if incident.type == "duplicate_settlement":
+                summaries.append(f"{title} was settled twice; debits still equal credits, "
+                                 f"but {instruction.debtor_name} was charged twice.")
+            elif incident.type == "missing_settlement":
+                summaries.append(f"{title} was acknowledged but never settled; "
+                                 f"{instruction.creditor_name} has not received the expected credit.")
+            else:
+                event = next(e for e in self.bank.events if e.instruction_id == identifier)
+                summaries.append(f"{title} was settled for {money_text(event.amount_minor)} instead of "
+                                 f"{money_text(instruction.amount_minor)}; the posting differs from the approved instruction.")
+        return " ".join(summaries)
 
     def _investigate(self, incident: Incident) -> None:
         lineage, timeline, summaries, services = [], [], [], set()
         entries = self.bank.ledger.entries
         for identifier in incident.affected_payments:
             instruction = self.bank.instructions[identifier]
+            payment_label = (f"{instruction.reference} from {instruction.debtor_name} "
+                             f"to {instruction.creditor_name}")
             events = [e for e in self.bank.events if e.instruction_id == identifier]
             postings = [e for e in entries if e.instruction_id == identifier]
             lineage.append(Lineage(instruction_id=identifier, event_ids=[e.id for e in events],
@@ -151,7 +172,7 @@ class IncidentCoordinator:
             services.update(e.service for e in events)
             if incident.type == "missing_settlement":
                 services.add(self.settlement.service.id)
-                summaries.append(f"{self.settlement.service.id} acknowledged instruction {identifier} "
+                summaries.append(f"{self.settlement.service.id} acknowledged instruction {payment_label} ({identifier}) "
                                  "but no event or posting exists after the grace window")
             elif incident.type == "tampered_settlement":
                 for event in events:
@@ -161,10 +182,10 @@ class IncidentCoordinator:
                         if getattr(event, field) != getattr(instruction, field)
                     ]
                     if differences:
-                        summaries.append(f"{event.service} altered event {event.id}: " + "; ".join(differences))
+                        summaries.append(f"{event.service} altered payment {payment_label} (event {event.id}): " + "; ".join(differences))
             else:
-                summaries.append(f"Events {', '.join(e.id for e in events)} share instruction {identifier} "
-                                 f"and idempotency key {instruction.idempotency_key}; retry bypassed deduplication")
+                summaries.append(f"Events ({', '.join(e.id for e in events)}) share instruction {payment_label} ({identifier}) "
+                                 f"and idempotency key ({instruction.idempotency_key}); retry bypassed deduplication")
         incident.lineage = lineage
         service = next(iter(services)) if len(services) == 1 else "settlement-svc"
         incident.root_cause = RootCause(
@@ -268,14 +289,63 @@ class IncidentCoordinator:
                     for line in entry.lines:
                         line.side = "credit" if line.side == "debit" else "debit"
         before = self.bank.ledger.serialize()
-        report = self.sandbox(candidate)
+        ledger = deepcopy(self.bank.ledger)
+        instructions, events = deepcopy(self.bank.instructions), deepcopy(self.bank.events)
+        checks_before = inspect(ledger, instructions, events).checks
+        balances_before = ledger.balances()
+        reasons = []
+        for proposed, expected in zip(candidate.proposal.entries, incident.proposal.entries):
+            payment = self.bank.instructions[proposed.instruction_id]
+            if proposed.corrects_entry_id != expected.corrects_entry_id:
+                reasons.append(RejectionReason(
+                    rule="lineage_guard",
+                    detail=f"Reverses original entry JE{proposed.corrects_entry_id.rsplit('-', 1)[-1]} of "
+                           f"{payment.reference} from {payment.debtor_name} to {payment.creditor_name}; "
+                           f"only the duplicate effect JE{expected.corrects_entry_id.rsplit('-', 1)[-1]} may be reversed.",
+                ))
+            elif proposed.lines != expected.lines:
+                reasons.append(RejectionReason(
+                    rule="amount_guard" if variant == "wrong_amount" else "intent_guard",
+                    detail=(f"{payment.reference} from {payment.debtor_name} to {payment.creditor_name}: "
+                            f"correction lines differ from the approved {money_text(payment.amount_minor)} "
+                            f"{payment.purpose_label.lower()} instruction; " +
+                            ("each line is overstated by AED 1.00." if variant == "wrong_amount"
+                             else "the replacement reverses the intended payment instead of restoring it.")),
+                ))
+        applied = False
+        try:
+            ledger.append_batch([(entry, self.correction_key(candidate, entry))
+                                 for entry in candidate.proposal.entries])
+            applied = True
+        except (ValueError, TypeError, KeyError) as error:
+            references = ", ".join(f"{instructions[p].reference} from {instructions[p].debtor_name} "
+                                   f"to {instructions[p].creditor_name}" for p in incident.affected_payments)
+            reasons.append(RejectionReason(rule="ledger_guard", detail=f"{references}: {error}"))
+        after = inspect(ledger, instructions, events)
+        if applied:
+            for check in after.checks:
+                if not check.passed:
+                    detail = check.detail
+                    for payment in instructions.values():
+                        detail = detail.replace(payment.id, payment.reference or "Payment")
+                    for account in self.bank.accounts.values():
+                        detail = detail.replace(account.id, account.name)
+                    references = ", ".join(f"{instructions[p].reference} ({instructions[p].debtor_name} "
+                                           f"to {instructions[p].creditor_name})" for p in incident.affected_payments)
+                    reasons.append(RejectionReason(rule="integrity_check", detail=f"{references}; {check.name}: {detail}"))
+        report = SandboxReport(
+            passed=not reasons and all(c.passed for c in after.checks),
+            checks_before=checks_before, checks_after=after.checks,
+            balances_before=balances_before, balances_after=ledger.balances(), ts=utcnow(),
+        )
         result = SandboxChallengeResponse(
             variant=variant, proposal=candidate.proposal, sandbox=report,
             ledger_unchanged=before == self.bank.ledger.serialize(),
+            applied=applied, rejection_reasons=reasons,
         )
         await self.bus.publish(self.record(
             AGENT, "sandbox.challenge.rejected", identifier,
-            f"{variant}; failing checks: " + ", ".join(c.name for c in report.checks_after if not c.passed),
+            f"{variant}; applied to sandbox: {applied}; " + "; ".join(r.detail for r in reasons),
         ))
         return result
 

@@ -23,14 +23,22 @@ def test_challenge_isolated_rejected_audited_and_real_recovery_succeeds(client, 
     assert result["variant"] == variant
     assert result["ledger_unchanged"] is True
     assert result["sandbox"]["passed"] is False
-    expected = {
-        "duplicate": {"single_financial_effect", "ledger_matches_expected"},
-        "missing": {"no_missing_settlements", "ledger_matches_expected"},
-        "tamper": {"event_integrity", "ledger_matches_expected"},
-    }
-    assert {c["name"] for c in result["sandbox"]["checks_after"] if not c["pass"]} == expected[kind]
+    applied = variant == "reverse_original" or kind == "missing"
+    assert result["applied"] is applied
+    assert result["rejection_reasons"]
+    assert all(r["detail"] for r in result["rejection_reasons"])
+    rules = {r["rule"] for r in result["rejection_reasons"]}
+    if kind == "duplicate" and variant == "reverse_original":
+        assert rules == {"lineage_guard"}
+        assert all(c["pass"] for c in result["sandbox"]["checks_after"])
+    elif applied:
+        assert "integrity_check" in rules
+        assert any(not c["pass"] for c in result["sandbox"]["checks_after"])
+    else:
+        assert "ledger_guard" in rules
+        assert result["sandbox"]["checks_after"] == result["sandbox"]["checks_before"]
     assert next(c for c in result["sandbox"]["checks_after"] if c["name"] == "ledger_balanced")["pass"]
-    assert result["sandbox"]["balances_before"] == result["sandbox"]["balances_after"]
+    assert (result["sandbox"]["balances_before"] != result["sandbox"]["balances_after"]) is applied
     assert client.get("/api/ledger?limit=500").content == ledger
     assert client.get(path).json() == original
     assert original["status"] == "awaiting_approval"

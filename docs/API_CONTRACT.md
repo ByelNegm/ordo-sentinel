@@ -32,14 +32,16 @@ Changes to this file need lead sign-off. The UI may only depend on the fields li
 - `POST /api/faults/{kind}` with `kind` ∈ `duplicate | missing | tamper`: injects a real fault into `settlement-svc`. The next live payment is affected. Returns `{ "fault": kind, "service": "settlement-svc" }`. 409 if a fault is already active or the service is quarantined. While integrity is not healthy, returns 409 with detail `"Integrity violated by an unrecovered incident; reset required"`.
 - `POST /api/incidents/{id}/approve` with body `{ "actor": "ops.lead@bank" }`: authorizes the validated recovery. 403 if the actor is not an authorized approver (authorized: `ops.lead@bank`, `treasury@bank`; the agent `blackbox-agent` can never approve). 404 for an unknown incident id (after the authorization check). 409 if the incident is not in `awaiting_approval`. Idempotent: a repeat returns the same incident unchanged.
 - `POST /api/incidents/{id}/reject` with body `{ "actor": "..." }`: rejects the proposal (status `rejected`). 404 for an unknown incident id.
-- `POST /api/incidents/{id}/sandbox/challenge` with body `{ "variant": "wrong_amount" | "reverse_original" }`: tests a deliberately unsafe proposal using the same isolated sandbox and canonical-proposal validation as real approval. Returns `{ variant, proposal: Proposal, sandbox: Incident["sandbox"], ledger_unchanged: bool }` with a non-null sandbox report. 404 for an unknown incident; 409 unless awaiting_approval; 422 for an unknown variant. wrong_amount adds 100 minor units to every proposed line (each entry still balances). reverse_original targets the first legitimate settlement instead of the duplicate; for missing/tamper it reverses the intended replacement effect instead of restoring it. Invalid candidates are rejected before appending even to the copied ledger; checks_after then describe the unrepaired copy. The real ledger, incident, approved proposal and status never change. Appends `sandbox.challenge.rejected` to audit and publishes `audit.appended`; no money movement or incident transition.
+- `POST /api/incidents/{id}/sandbox/challenge` with body `{ "variant": "wrong_amount" | "reverse_original" }`: tests an unsafe candidate without changing the real ledger, proposal or incident status. Returns `{ variant, proposal: Proposal, sandbox: Incident["sandbox"], ledger_unchanged: bool, applied: bool, rejection_reasons: {rule: string, detail: string}[] }` with a non-null sandbox report. 404 for an unknown incident; 409 unless awaiting_approval; 422 for an unknown variant. wrong_amount adds 100 minor to each line; reverse_original targets the legitimate posting instead of the duplicate (missing/tamper reverse the intended replacement). First records canonical/lineage rule violations, then attempts an atomic append on a copy. A refused append records ledger_guard and applied=false, with unchanged checks/balances. An accepted append sets applied=true and reports genuine post-apply checks/balances, recording integrity_check reasons for failures. Duplicate reverse_original has 7/7 post-apply checks but is still rejected by lineage_guard: only the extra effect may be reversed. Reasons use payment references/names. Appends sandbox.challenge.rejected and publishes audit.appended; real approval remains separately canonical-validated.
 - `POST /api/services/settlement-svc/release`: lifts quarantine when no incident is open (including after rejection). Open statuses are `detected`, `investigating`, `contained`, `validating`, `awaiting_approval` and `correcting`. Held instructions are then processed. 409 if an incident is open or the service is not quarantined. Rejection acknowledges rather than repairs a violation; integrity can remain violated after release.
 
 ## Shapes
 
+Display metadata is additive and optional for older consumers. Seeded accounts carry synthetic UAE IBANs (AE + mod-97 digits + bank code 033 + 16 account digits); these identify no real accounts. Payment references use FT + seed year/day + five deterministic alphanumerics. Purpose codes: SAL Salary (AED 8,000–45,000), SUP Supplier payment (2,500–25,000), RNT Rent (3,000–18,000), UTL Utilities (300–2,500), INV Invoice settlement (1,500–35,000), FND Opening balance transfer (200,000–450,000). Generated amounts include nonzero fils. Existing identifiers and canonical hash inputs remain unchanged; names, IBANs, references and purposes are not hash inputs.
+
 ```ts
 type Overview = {
-  accounts: { id: string; name: string; type: "customer" | "internal"; balance_minor: number }[];
+  accounts: { id: string; name: string; type: "customer" | "internal"; balance_minor: number; iban?: string | null }[];
   totals: { debits_minor: number; credits_minor: number; ledger_entries: number };
   volume: { instructions: number; settled: number; pending: number; held: number };
   services: Service[];
@@ -57,6 +59,8 @@ type Service = {
 
 type PaymentInstruction = {
   id: string; idempotency_key: string;
+  reference?: string | null; purpose?: string | null; purpose_label?: string | null;
+  debtor_name?: string | null; creditor_name?: string | null;
   debtor: string; creditor: string; amount_minor: number; currency: "AED";
   created_at: string;
   status: "accepted" | "settled" | "held" | "missing" | "discrepancy";
@@ -87,6 +91,7 @@ type TimelineItem = { ts: string; kind: "instruction" | "settlement" | "posting"
 
 type Incident = {
   id: string;
+  summary_text?: string | null;
   type: "duplicate_settlement" | "missing_settlement" | "tampered_settlement";
   status: "detected" | "investigating" | "contained" | "validating" | "awaiting_approval" | "correcting" | "resolved" | "rejected" | "failed";
   detected_at: string;
