@@ -6,7 +6,7 @@ import pytest
 from app.bank import Bank
 from app.models import Counterparty, Risk, Txn
 from app.policy import PolicyContext, decide
-from app.risk import RiskContext, score
+from app.risk import CustomerBaseline, RiskContext, score
 
 
 NOW = datetime(2025, 11, 22, 13, tzinfo=timezone(timedelta(hours=4)))
@@ -40,6 +40,62 @@ def test_normal_and_empty_history_ignore_fixture_risk():
     for history in ([], baseline()):
         result = score(transaction(), RiskContext(520000, 0, history))
         assert result == Risk(score=0, level="low", factors=[])
+
+
+def customer_baseline():
+    histogram = [0] * 24
+    histogram[2] = 90
+    return CustomerBaseline(histogram, 100, 20, {"AE001"}, {"known_device"}, {"known_client"})
+
+
+def test_populated_baseline_prefers_habits_over_conflicting_history():
+    txn = transaction(ts=NOW.replace(hour=2), channel="api")
+    txn.counterparty.is_new = True
+    history = [transaction(id="old", ts=NOW - timedelta(days=1), amount=1,
+                           device_id="other", client_id="other")]
+    history[0].counterparty.iban = "other"
+    ctx = RiskContext(520000, recent_transactions=history, baseline=customer_baseline())
+    assert score(txn, ctx) == Risk(score=0, level="low", factors=[])
+
+
+def test_populated_baseline_deviations_fire_without_history():
+    txn = transaction(amount=10000, channel="api", device_id="new", client_id="new")
+    txn.counterparty.is_new = True
+    txn.counterparty.iban = "new"
+    ctx = RiskContext(520000, baseline=customer_baseline())
+    result = {f.code: f.weight for f in score(txn, ctx).factors}
+    assert result == {"AMOUNT_ZSCORE": 25, "UNUSUAL_HOUR": 18, "NEW_PAYEE": 16,
+                      "NEW_API_CLIENT": 10, "NEW_DEVICE": 8}
+
+
+def test_partial_baseline_falls_back_per_field():
+    txn = transaction(channel="api")
+    ctx = RiskContext(520000, recent_transactions=baseline(),
+                      baseline=CustomerBaseline(known_api_clients={"known_client"}))
+    assert score(txn, ctx).score == 0
+
+
+def test_context_defaults_are_independent_and_positional_calls_still_work():
+    first, second = RiskContext(), RiskContext()
+    first.baseline.hour_histogram[2] = 1
+    first.baseline.known_payees.add("AE001")
+    first.baseline.known_devices.add("device")
+    first.baseline.known_api_clients.add("client")
+    first.recent_transactions.append(transaction())
+    assert second.baseline == CustomerBaseline()
+    assert second.balance == second.cumulative_drain == 0
+    assert second.recent_transactions == []
+    assert RiskContext(520000, 3000, []).baseline == CustomerBaseline()
+
+
+@pytest.mark.parametrize("values", [
+    {"hour_histogram": [0] * 23}, {"hour_histogram": [-1] + [0] * 23},
+    {"hour_histogram": [float("nan")] + [0] * 23},
+    {"amount_mean": -1}, {"amount_std": float("inf")},
+])
+def test_invalid_baseline(values):
+    with pytest.raises(ValueError):
+        CustomerBaseline(**values)
 
 
 def test_cold_start_overnight_api_scores_and_levels():

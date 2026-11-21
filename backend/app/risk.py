@@ -12,15 +12,35 @@ OFFSHORE_COUNTRIES = frozenset({"SC", "KY", "VG", "BM", "BS", "PA", "JE", "GG", 
 
 
 @dataclass
+class CustomerBaseline:
+    hour_histogram: list[int] = field(default_factory=lambda: [0] * 24)
+    amount_mean: float = 0
+    amount_std: float = 0
+    known_payees: set[str] = field(default_factory=set)
+    known_devices: set[str] = field(default_factory=set)
+    known_api_clients: set[str] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        if len(self.hour_histogram) != 24 or any(
+            not isfinite(v) or v < 0 for v in self.hour_histogram
+        ):
+            raise ValueError("Hour histogram must contain 24 finite nonnegative values")
+        if any(not isfinite(v) or v < 0 for v in (self.amount_mean, self.amount_std)):
+            raise ValueError("Amount statistics must be finite and nonnegative")
+
+
+@dataclass
 class RiskContext:
-    balance: float
+    balance: float = 0
     cumulative_drain: float = 0
     recent_transactions: list[Txn] = field(default_factory=list)
+    baseline: CustomerBaseline = field(default_factory=CustomerBaseline)
 
 
 def score(txn: Txn, ctx: RiskContext) -> Risk:
-    """Use posted/allowed history as baseline; held/blocked attempts only affect velocity.
+    """Prefer populated baseline fields, otherwise derive from posted/allowed history.
 
+    Held/blocked attempts only affect velocity.
     Empty history uses a daytime (06–23), domestic-AE cold start, not synthetic
     customer statistics. Cumulative drain includes this candidate once, in AED.
     """
@@ -48,9 +68,12 @@ def score(txn: Txn, ctx: RiskContext) -> Risk:
     def add(code: str, label: str, weight: int) -> None:
         factors.append(Factor(code=code, label=label, weight=weight))
 
-    if history:
-        mean = sum(t.amount for t in history) / len(history)
-        deviation = sqrt(sum((t.amount - mean) ** 2 for t in history) / len(history))
+    baseline = ctx.baseline
+    has_amount_stats = baseline.amount_mean > 0 or baseline.amount_std > 0
+    if has_amount_stats or history:
+        mean = baseline.amount_mean if has_amount_stats else sum(t.amount for t in history) / len(history)
+        deviation = (baseline.amount_std if has_amount_stats else
+                     sqrt(sum((t.amount - mean) ** 2 for t in history) / len(history)))
         # A 10%/AED 1 floor keeps a constant or tiny baseline well-defined.
         z_score = (txn.amount - mean) / max(deviation, mean * 0.10, 1.0)
         if z_score >= 3:
@@ -58,19 +81,23 @@ def score(txn: Txn, ctx: RiskContext) -> Risk:
             add("AMOUNT_ZSCORE", "Amount exceeds the 90-day baseline by at least 3 standard deviations",
                 25 if txn.amount > ctx.balance * 0.01 else 5)
 
-    hours = {t.ts.astimezone(txn.ts.tzinfo).hour for t in history}
+    hours = ({hour for hour, count in enumerate(baseline.hour_histogram) if count > 0}
+             if any(baseline.hour_histogram) else
+             {t.ts.astimezone(txn.ts.tzinfo).hour for t in history})
     unusual_hour = (all(min((txn.ts.hour - h) % 24, (h - txn.ts.hour) % 24) > 2 for h in hours)
                     if hours else txn.ts.hour < 6 or txn.ts.hour >= 23)
     if unusual_hour:
         add("UNUSUAL_HOUR", "Outside usual customer hours", 18)
     if burst_count:
         add("VELOCITY", "Multiple outgoing instructions within 60 seconds", 18)
-    known_payees = {t.counterparty.iban for t in history}
+    known_payees = baseline.known_payees or {t.counterparty.iban for t in history}
     if txn.counterparty.is_new and txn.counterparty.iban not in known_payees:
         add("NEW_PAYEE", "First payment to payee", 16)
-    if txn.channel == "api" and txn.client_id not in {t.client_id for t in history}:
+    known_clients = baseline.known_api_clients or {t.client_id for t in history}
+    if txn.channel == "api" and txn.client_id not in known_clients:
         add("NEW_API_CLIENT", "Unfamiliar API client", 10)
-    if txn.device_id not in {t.device_id for t in history} and (history or txn.channel == "api"):
+    known_devices = baseline.known_devices or {t.device_id for t in history}
+    if txn.device_id not in known_devices and (known_devices or txn.channel == "api"):
         add("NEW_DEVICE", "Unfamiliar device", 8)
 
     country_counts = Counter(t.counterparty.country for t in history)
