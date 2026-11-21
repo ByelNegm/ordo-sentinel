@@ -16,6 +16,7 @@ from .models import (
     AlertResolvedEvent,
     CustomerMessage,
     Explanation,
+    Factor,
     ScenarioStatus,
     ScenarioStatusEvent,
     Txn,
@@ -153,9 +154,14 @@ class ScenarioRunner:
     async def _submit(self, txn: Txn, pace: float) -> None:
         ctx = self.bank.risk_context(txn)
         txn.risk = score(txn, ctx)
-        decision = decide(txn.risk, PolicyContext(
-            ctx.balance, ctx.cumulative_drain, txn.client_id in self.bank.state.frozen_clients,
-        ))
+        client_frozen = txn.client_id in self.bank.state.frozen_clients
+        decision = decide(txn.risk, PolicyContext(ctx.balance, ctx.cumulative_drain, client_frozen))
+        if client_frozen:
+            txn.risk.factors.append(Factor(
+                code="CLIENT_ALREADY_FROZEN",
+                label="Connected service already frozen",
+                weight=0,
+            ))
         {"allow": self.bank.post, "hold": self.bank.hold, "freeze": self.bank.block}[decision](txn)
         posted = self.bank.transactions[txn.id]
         alert = self._alert(posted) if posted.status != "posted" else None
