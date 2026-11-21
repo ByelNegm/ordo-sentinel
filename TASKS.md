@@ -12,20 +12,23 @@ Owners: **Devin** = backend/lead, **UI** = colleague's Devin session. Times are 
 - [x] Incident pipeline: investigate → contain → propose → sandbox → awaiting_approval
 - [x] Approval gate (403/409), idempotent compensation, verification, release
 - [x] Traffic trickle, reset, SSE, audit log
-- [x] pytest suite green (46 tests); P0 HTTP flow 3× + each P2 HTTP flow; live curl flow for all three kinds from reset
+- [x] pytest suite green (51 tests); P0 HTTP flow 3× + each P2 HTTP flow; live curl flow for all three kinds from reset
 - [x] Independent P0 review gate pass (6e21285, reviewer verdict PASS)
 - [x] Review follow-ups: closed-incident handling/release, append failure audit, limit ≤500, unknown-id contract clarification
+- [x] Devin Review gate fixes (f13b2e4): healthy-integrity fault gate; post-rejection and pre-quarantine overlap regressions
 
 ## M2 — UI (→14:45, UI)
-- [ ] Shell, status bar, SSE hook, mock mode
-- [ ] Bank Operations · Attack Simulator
-- [ ] Incident Investigation · Recovery Sandbox · Recovery Verification
+Console delivered in PR #8 (ui/blackbox-console); merge pending. Live-only by design; no mock mode.
+- [x] Shell, status bar, SSE hook against the real backend
+- [x] Bank Operations · Attack Simulator
+- [x] Incident Investigation · Recovery Sandbox · Recovery Verification
 - [ ] Acceptance flow 3× against the live backend
 
 ## M3 — P2 scenarios (14:30–15:00, Devin)
 - [x] Missing settlement · Tampered settlement (detection + recovery)
 
 ## M4 — Ship (15:00–16:00, Team)
+- [x] README console run steps and demo reset checklist
 - [ ] Feature freeze 15:00; e2e demo runs ×3
 - [ ] 5-min script + video (incl. Devin engineering evidence)
 - [ ] Submit by 15:30; rehearse
