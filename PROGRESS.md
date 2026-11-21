@@ -1,5 +1,5 @@
 # Progress — BLACKBOX
-**Current phase:** Pivot. Contract v1 + frontend brief pushed; backend P0 (duplicate settlement) in progress.
+**Current phase:** Backend P0 implemented and verified; independent review and UI integration pending.
 **Next milestone:** 14:30 live backend P0; 14:45 UI integrated.
 **Blockers:** none.
 **Clock:** 2026-11-21, Asia/Dubai; submit 15:30, hard deadline 16:00.
@@ -8,6 +8,7 @@
 Append a dated, timed entry (newest first) when finishing a task or changing a decision, in the same PR. Tick the matching [TASKS.md](TASKS.md) item. Read [GOAL.md](GOAL.md) before taking new work.
 
 ## Log — 2026-11-21 (Asia/Dubai)
+- **13:29 — Devin:** BLACKBOX P0 complete: archived Sentinel via git mv; strict integer-money models; 12 accounts/100 deterministic normal-path seed payments; real duplicate retry posts twice while ledger_balanced stays true; independent effect/balance checks detect it. Deterministic lineage/root cause, quarantine/held queue, isolated sandbox, authorized/idempotent append-only compensation and release implemented. pytest -q: 33 passed, one existing Starlette TestClient deprecation warning; includes HTTP flow ×3, invalid sandbox isolation and reset task cancellation. Live curl flow ×1 passed through agent 403 → ops approval → resolved (7/7) → held-payment release; all SSE statuses observed. Contract hash unchanged. Evidence: /home/ubuntu/blackbox-evidence/; uvicorn :8000 remains running, traffic stopped, service healthy. Missing/tamper injection is 501 for P2; independent review gate remains unchecked.
 - **13:20 — Devin:** Pivot to BLACKBOX on `pivot/blackbox` (from main). Froze docs/API_CONTRACT.md v1 and docs/FRONTEND_BRIEF.md for the UI. Old Ordo Sentinel builders stopped; PR #5 not merged.
 - **13:14 — Team:** Pivot: Ordo Sentinel (customer fraud) discontinued → BLACKBOX, track "Protect the Big Guy — Code, Data & Infrastructure Rails".
 

@@ -7,12 +7,12 @@ Owners: **Devin** = backend/lead, **UI** = colleague's Devin session. Times are 
 - [x] GOAL / TASKS / PROGRESS / README rewritten (Devin)
 
 ## M1 — Backend P0, duplicate settlement (→14:30, Devin)
-- [ ] Models, ledger, bank seed (100 payments), settlement-svc with fault modes
-- [ ] 7 integrity checks + reconciliation
-- [ ] Incident pipeline: investigate → contain → propose → sandbox → awaiting_approval
-- [ ] Approval gate (403/409), idempotent compensation, verification, release
-- [ ] Traffic trickle, reset, SSE, audit log
-- [ ] pytest suite green; full curl flow 3× from clean seed
+- [x] Models, ledger, bank seed (100 payments), settlement-svc duplicate fault + P2 hooks (501)
+- [x] 7 integrity checks + reconciliation
+- [x] Incident pipeline: investigate → contain → propose → sandbox → awaiting_approval
+- [x] Approval gate (403/409), idempotent compensation, verification, release
+- [x] Traffic trickle, reset, SSE, audit log
+- [x] pytest suite green (33 tests); full HTTP flow 3× from clean seeds + live curl flow 1×
 - [ ] Independent review gate pass
 
 ## M2 — UI (→14:45, UI)
