@@ -7,6 +7,7 @@ import type { ChallengeVariant, Check as IntegrityCheck, Entry, SandboxChallenge
 import { api, useBank } from './useBank'
 import { createDisplay } from './display'
 import { deriveWorkflow, workflowSteps } from './workflow'
+import { sandboxRunnerLabel } from './sandboxRunner'
 
 const DisplayContext = createContext(createDisplay([], [], []))
 
@@ -257,7 +258,7 @@ export default function App() {
         <SectionTitle number="04" title="Recovery Sandbox" subtitle="Prove the correction in isolation. A human decides whether it reaches the ledger." />
         {!incident?.proposal ? <Panel title="Isolated recovery environment"><Empty>No proposal yet. Recovery proposals appear here after investigation and containment.</Empty></Panel> : <>
           <div className="challenge-comparison">
-            {incident.sandbox ? <div className={`sandbox-banner ${incident.sandbox.passed ? 'passed' : 'failed'}`}>{incident.sandbox.passed ? <ShieldCheck size={27} /> : <ShieldX size={27} />}<div><strong data-testid="sandbox-result">SANDBOX {incident.sandbox.passed ? 'PASSED' : 'FAILED'}</strong><p>{incident.sandbox.passed ? 'All seven checks pass on an isolated copy. The real ledger is untouched.' : 'Validation failed. Do not apply this proposal.'}</p></div><span className="method">ISOLATED COPY</span></div> : <div className="sandbox-banner"><LoaderCircle className="spin" /><strong>Sandbox validation in progress</strong></div>}
+            {incident.sandbox ? <div className={`sandbox-banner ${incident.sandbox.passed ? 'passed' : 'failed'}`}>{incident.sandbox.passed ? <ShieldCheck size={27} /> : <ShieldX size={27} />}<div><strong data-testid="sandbox-result">SANDBOX {incident.sandbox.passed ? 'PASSED' : 'FAILED'}</strong><p>{incident.sandbox.passed ? 'All seven checks pass on an isolated copy. The real ledger is untouched.' : 'Validation failed. Do not apply this proposal.'}</p>{incident.sandbox.passed && <span className="runner-badge" data-testid="sandbox-runner">{sandboxRunnerLabel(incident.sandbox)}</span>}</div><span className="method">ISOLATED COPY</span></div> : <div className="sandbox-banner"><LoaderCircle className="spin" /><strong>Sandbox validation in progress</strong></div>}
             <div className="panel challenge-controls">
               <h3>Attempt unsafe correction</h3><p>Test a deliberately wrong candidate. Never apply it to the real ledger.</p>
               <div className="challenge-buttons">

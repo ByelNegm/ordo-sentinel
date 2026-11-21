@@ -63,5 +63,6 @@ main>section+section{padding-top:0;margin-top:55px}
 .rejection-reasons strong{display:block;color:#fb9aa4;font-size:11px;text-transform:capitalize;margin-bottom:6px}
 .rejection-reasons span{font-size:11px;line-height:1.6;color:#e3c5cd;overflow-wrap:anywhere}
 .text-link{border:0;background:none;padding:0;color:var(--cyan);text-decoration:underline}
+.runner-badge{display:inline-block;margin-top:12px;padding:7px 10px;border:1px solid #315660;border-radius:5px;background:#112831;color:#a5e0e6;font-size:11px;line-height:1.6;overflow-wrap:anywhere}
 @media(max-width:1250px){.workflow-strip{left:205px;padding-left:22px;padding-right:22px}.workflow-steps{gap:7px}.workflow-steps strong{font-size:9px}}
 @media(max-width:850px){.workflow-strip{left:65px;padding:10px 16px}.workflow-steps{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:10px}.workflow-next{align-items:flex-start}.workflow-next p{font-size:10px}.workflow-next .button{font-size:10px;padding:8px}.incident-summary{font-size:15px;padding:16px}}

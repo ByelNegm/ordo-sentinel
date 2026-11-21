@@ -37,6 +37,8 @@ export type Incident = {
   sandbox: {
     passed: boolean; checks_before: Check[]; checks_after: Check[]
     balances_before: Record<string, number>; balances_after: Record<string, number>; ts: string
+    runner?: 'daytona' | 'local'; runner_id?: string | null
+    remote_match?: boolean | null; runner_note?: string | null
   } | null
   approval: { actor: string; at: string } | null
   corrections: string[]; verification: Integrity | null
