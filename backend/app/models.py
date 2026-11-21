@@ -23,6 +23,7 @@ class Account(Model):
     name: str
     type: Literal["customer", "internal"]
     balance_minor: StrictInt
+    iban: str | None = None
 
 
 class Service(Model):
@@ -43,6 +44,11 @@ class PaymentInstruction(Model):
     status: Literal["accepted", "settled", "held", "missing", "discrepancy"] = "accepted"
     settlement_count: int = 0
     expected_hash: str
+    reference: str | None = None
+    purpose: str | None = None
+    purpose_label: str | None = None
+    debtor_name: str | None = None
+    creditor_name: str | None = None
 
 
 class SettlementEvent(Model):
@@ -133,11 +139,18 @@ class SandboxChallengeRequest(Model):
     variant: Literal["wrong_amount", "reverse_original"]
 
 
+class RejectionReason(Model):
+    rule: str
+    detail: str
+
+
 class SandboxChallengeResponse(Model):
     variant: Literal["wrong_amount", "reverse_original"]
     proposal: Proposal
     sandbox: SandboxReport
     ledger_unchanged: bool
+    applied: bool
+    rejection_reasons: list[RejectionReason]
 
 
 class Approval(Model):
@@ -163,6 +176,7 @@ class Incident(Model):
     sandbox: SandboxReport | None = None
     approval: Approval | None = None
     corrections: list[str] = Field(default_factory=list)
+    summary_text: str | None = None
     verification: IntegrityReport | None = None
 
 
