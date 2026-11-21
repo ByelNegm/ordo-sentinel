@@ -38,7 +38,7 @@ class RiskContext:
 
 
 def score(txn: Txn, ctx: RiskContext) -> Risk:
-    """Prefer populated baseline fields, otherwise derive from posted/allowed history.
+    """Prefer populated baseline fields, otherwise derive from posted history (incl. confirmed holds).
 
     Held/blocked attempts only affect velocity.
     Empty history uses a daytime (06–23), domestic-AE cold start, not synthetic
@@ -60,7 +60,7 @@ def score(txn: Txn, ctx: RiskContext) -> Risk:
         seen.add(previous.id)
         if age <= BURST_SECONDS:
             burst_count += 1
-        if previous.status == "posted" and previous.decision == "allow":
+        if previous.status == "posted":
             history.append(previous)
 
     factors = []

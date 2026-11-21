@@ -240,3 +240,10 @@ def test_average_risk_and_policy_latency_under_five_ms():
         assert decide(score(txn, risk_ctx), policy_ctx) == "freeze"
     average_ms = (perf_counter() - start) * 1000 / 500
     assert average_ms < 5, f"Average risk+policy latency: {average_ms:.3f}ms"
+
+
+def test_confirmed_hold_counts_as_history():
+    payee = transaction().counterparty.model_copy(update={"is_new": True, "iban": "AE009"})
+    confirmed = transaction(id="confirmed", ts=NOW - timedelta(days=1), counterparty=payee,
+                            decision="hold", status="posted")
+    assert "NEW_PAYEE" not in factors(transaction(counterparty=payee), [confirmed])
