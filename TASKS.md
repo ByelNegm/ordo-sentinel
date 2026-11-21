@@ -9,7 +9,7 @@ All target times: **2026-11-21, Asia/Dubai**. Check only when complete; append e
 - [ ] [ByelNegm + Devin] Risk engine, customer stats and reason codes — **13:00**.
 - [ ] [ByelNegm + Devin] Policy: <40 allow, 40–75 hold, >75 or cumulative drain >30% freeze client — **13:15**.
 - [ ] [ByelNegm + Devin] Decision/unfreeze/reset endpoints; idempotency and runner cancellation — **13:30**.
-- [ ] [ByelNegm + Devin] Async cached LLM explainer + immediate EN/AR template fallback — **13:30**.
+- [x] [ByelNegm + Devin] Async cached LLM explainer + immediate EN/AR template fallback — **13:30**.
 - [ ] [ByelNegm + Devin] CORS/proxy check with frontend; Vite /api → :8000 — **13:45**.
 - [ ] [ByelNegm + Devin] pytest drain scenario, policy boundaries, duplicate deny, reset and LLM failure; measure freeze latency — **14:30**.
 
