@@ -1,6 +1,8 @@
 # Ordo Sentinel
 **Team ordo_system · CIS Hack: Protect the little guy: human & transaction**
 
+Start here: [Goal / scope](GOAL.md) · [Owner tasks](TASKS.md) · [Progress log](PROGRESS.md).
+
 ## Pitch
 Authentication passed. Intent did not. Ordo Sentinel is bank-side autonomous transaction defense with a customer guardian UI.
 
@@ -36,4 +38,4 @@ Single Python process; one frontend app with **/phone** and **/analyst**. No rea
 - Data is synthetic; dates are a fixed demo clock, not wall-clock scheduling.
 
 ## Team
-**ordo_system** — backend owner + Devin; frontend colleague + a separate Devin session. Deadline **4:00 PM today**; MVP only. Devin parallel work and Cap recording will be shown in the submission. No remote repository exists yet; this draft is local only.
+**ordo_system** — backend owner ByelNegm + Devin; frontend colleague + a separate Devin session. Deadline **16:00 Asia/Dubai**; submit by **15:30**; MVP only. Devin parallel work and Cap recording will be shown in the submission. Repository: https://github.com/ByelNegm/ordo-sentinel.

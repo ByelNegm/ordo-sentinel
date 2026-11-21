@@ -1,4 +1,5 @@
 # Frontend Devin handoff — Ordo Sentinel
+Read [GOAL.md](../GOAL.md) first; tick your completed tasks in [TASKS.md](../TASKS.md) and append a completion/decision entry to [PROGRESS.md](../PROGRESS.md) in your PRs.
 You own **all UI only**, for team **ordo_system**, CIS Hack “Protect the little guy: human & transaction.” Deadline 16:00 today; MVP only. Implement one React + Vite + Tailwind app in frontend/. Backend owner + another Devin session build FastAPI separately. Start from fixtures now; never wait for backend.
 
 ## Product / story

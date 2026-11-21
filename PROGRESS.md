@@ -1,0 +1,14 @@
+# Progress — Ordo Sentinel
+**Current phase:** MVP build kickoff; planning docs and fixtures ready.  
+**Next milestone:** 12:15 contract/fixtures freeze + UI skeleton.  
+**Blockers:** colleague collaborator invite pending.  
+**Clock:** 2026-11-21, Asia/Dubai (UTC+04:00); submit 15:30, deadline 16:00.
+
+## Update rule
+Every session/person appends a dated, timed entry when finishing a task or changing a decision, in its PR. Keep newest first (insert at top of log), name the owner, outcome/evidence and any decision or blocker; tick the matching [TASKS.md](TASKS.md) item and refresh this status header. Read [GOAL.md](GOAL.md) before taking new work. Fixture timestamps use a fixed demo clock, not this work log's date.
+
+## Log — 2026-11-21 (Asia/Dubai)
+- **11:51 — Devin:** Added GOAL.md, TASKS.md and PROGRESS.md with README/frontend handoff links; build tasks remain unchecked. Next: contract freeze and implementation.
+- **11:50 — ByelNegm + Devin:** Repo created + docs pushed to https://github.com/ByelNegm/ordo-sentinel. Plan, API contract, fixtures and frontend brief ready; JSON fixtures and documentation examples parsed successfully.
+- **11:37 — Team:** Decisions locked: hybrid rules/statistics decide, LLM only explains; FastAPI + SSE; React/Vite/Tailwind; freeze the API client/consent token.
+- **11:29 — Team:** Kickoff, slides read and Q&A; focus on protecting the customer after successful authentication.
