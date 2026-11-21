@@ -1,57 +1,53 @@
-# Frontend Devin handoff — Ordo Sentinel
-Read [GOAL.md](../GOAL.md) first; tick your completed tasks in [TASKS.md](../TASKS.md) and append a completion/decision entry to [PROGRESS.md](../PROGRESS.md) in your PRs.
-You own **all UI only**, for team **ordo_system**, CIS Hack “Protect the little guy: human & transaction.” Deadline 16:00 today; MVP only. Implement one React + Vite + Tailwind app in frontend/. Backend owner + another Devin session build FastAPI separately. Start from fixtures now; never wait for backend.
+# BLACKBOX Frontend Brief (paste into the UI Devin session)
 
-## Product / story
-At 2 AM, customer Aisha is asleep. FaceID/video KYC/auth already passed, but API transfers target her account. Bank-side rules/statistics flag small new-payee transfers and freeze a **−AED 450,000 offshore wire** before posting. LLM only explains; it never approves money movement. Customer taps Deny; show **AED 450,000 protected**. No trained ML or real banking.
+**Project pivot:** Ordo Sentinel (customer fraud) is discontinued. We now build **BLACKBOX: Autonomous Banking Incident Reconstruction & Recovery** for the track "Protect the Big Guy — Code, Data & Infrastructure Rails". The hard deadline is **16:00 Dubai** and the UI must be integrated by **14:45**.
 
-## Screens
-- **/analyst**: dark bank-grade dashboard; balances (posted/available/held), large protected counter, live transaction table, timestamp/amount/payee/channel/status, score and risk-factor chips, alert narrative/detail panel, frozen client badge + explicit unfreeze action. Buttons: normal scenario, drain scenario, reset. Show scenario step, connection/mock badge and meaningful empty/error states.
-- **/phone**: mobile-frame guardian view; customer/balance summary, alert card with plain-language EN/AR message (Arabic RTL), amount, unfamiliar service/payee, Confirm / Deny, clear pending/error/success state. Prioritize wire alert so Deny yields exactly AED 450,000 protected. Explain that blocked funds have not left. Disable confirm when frozen and explain why.
-- Consistent emerald protection, amber hold, red block; color plus labels/icons, legible type, restrained motion, touch-sized actions. Analyst desktop + responsive mobile frame, no native app. Visible demo-only label; never imply real push or production auth.
+Read first: `GOAL.md`, `docs/API_CONTRACT.md` (the only source of field names), `TASKS.md` (tick the UI items) and `PROGRESS.md` (add a dated entry for each PR).
 
-## Contract / integration
-Read docs/API_CONTRACT.md as source of truth. Vite proxies /api to http://localhost:8000.
-GET /api/state, /api/transactions?limit=50, /api/alerts; POST /api/scenario/{normal|drain}/start, /api/reset, /api/alerts/{id}/decision with {decision:"confirm"|"deny"}, /api/clients/{client_id}/unfreeze; EventSource /api/stream.
-Envelope {type,ts,data}: txn.scored (upsert transaction), alert.created (upsert alert, including later explanation), alert.resolved (remove active + retain resolution), account.updated (merge money fields and frozen_clients/protected_amount), scenario.status. 15s SSE comment heartbeats need no UI dispatch. Fetch snapshots on load, reset, action completion and reconnect; render connection state. No silent retry of money actions; backend handles idempotency. Avoid duplicate rows/counters from repeated events.
+## Rules
+- Work only in `frontend/`. Branch from `pivot/blackbox` as `ui/*` and open PRs into `pivot/blackbox`. Do not edit `backend/` or the contract; ask the lead.
+- The old `/phone` and `/analyst` guardian UI is retired. Don't continue it.
+- **Every control calls the real backend.** No fake buttons, prerecorded success states or hardcoded recovery animations. Everything on screen comes from the REST/SSE data.
+- Money is integer minor units. Format with `(amount_minor / 100).toLocaleString('en-AE', { style: 'currency', currency: 'AED' })`.
 
-## Mock without backend
-- VITE_USE_MOCK=true selects a mock adapter; false uses REST/SSE. No automatic fallback that hides integration failures.
-- Load root fixtures via Vite raw imports (e.g. ../../fixtures/state.json from frontend/src/) and events.ndjson with ?raw; parse each nonempty line with JSON.parse. Keep the same adapter API/reducer for both modes.
-- Reset loads state.json plus empty transactions/alerts. transactions.json is a catalog: normal mode posts txn_normal once (AED 85), leaving 519915. alerts.json is the pre-decision drain checkpoint, not reset content.
-- Drain replay uses the NDJSON envelope timestamps on a timer (0,1,2 seconds; preserve order for ties). No real SSE framing parsing required in mock mode. Starts from normal-completed balance. Repeated alert_burst IDs update one card.
-- Replay has scripted wire deny at +8s then burst deny at +9s. For interactive mode PAUSE before these and generate matching resolution/account updates on actual taps; for unattended replay dispatch them on schedule. Never do both or increment protection twice.
-- Deny wire: protected 450000, held 3000, posted 519915, available 516915; frozen API stays frozen. Deny burst later: protected 453000, held 0, available 519915. Confirm on frozen client is 409; show reason, do not post. Reset cancels every timer and restores fixture seed.
-- Empty/error/LLM-fallback states must stay usable. Display backend customer text as plain text, not HTML.
+## Stack
+React + Vite + TypeScript + Tailwind. `vite.config.ts` proxies `/api` to `http://localhost:8000`. Use one `EventSource('/api/stream')` hook that keeps state: overview, latest 50 payments, settlements, ledger, incidents by id, audit. On `reset`/reconnect, refetch with GET. Optional: `recharts` for volume, `framer-motion` for subtle transitions.
 
-## Suggested file layout
-frontend/
-  package.json
-  index.html
-  vite.config.ts
-  src/
-    main.tsx
-    App.tsx
-    styles.css
-    pages/Phone.tsx
-    pages/Analyst.tsx
-    components/ProtectedCounter.tsx
-    components/AlertCard.tsx
-    components/TransactionTable.tsx
-    components/RiskChips.tsx
-    lib/api.ts
-    lib/mock.ts
-    lib/store.ts
-    types.ts
+## Look and feel
+A premium dark fintech command center: near-black background (`#0a0d12`), slate panels, a single cyan accent for live data, amber for detecting/investigating, red for violated/quarantined, green for verified. Inter/Geist typography, tabular numbers for money, restrained motion (fade/slide of about 150ms, a pulse on live rows). It must be readable from the back of a room: large status headline, high contrast.
 
-You may create frontend-local config/dependencies as needed during implementation; none exist yet. Do not edit backend/. Do not alter shared docs/fixtures/contract without coordinating with backend owner. No auth, DB, real SMS/push, ML, multiple customers or native mobile. Do not deploy publicly.
+## Layout
+A single page (`/`) with a left rail of 5 sections and a persistent top status bar showing **integrity status** (HEALTHY / VIOLATED / RECOVERING), checks passed x/7, `settlement-svc` status, open incidents and traffic on/off.
 
-## Schedule / collaboration
-- 12:15: UI skeleton and contract frozen.
-- 13:45: integrate both routes with backend.
-- 14:45: feature freeze.
-- 15:00: Cap five-minute recording; 15:30 GitHub + video submission; 16:00 deadline.
-Use ui/* branches; backend uses api/*; PRs target main. Repo: https://github.com/ByelNegm/ordo-sentinel (clone it; work on ui/* branches). Show parallel Devin sessions in video. Optional Daytona only if ≤20 minutes; skip Graphify/Collabute unless instant win.
+1. **Bank Operations**
+   - A live payments table (id, debtor → creditor, amount, status, `settlement_count` badge; a red "×2" when it's 2).
+   - A settlement event feed.
+   - Ledger totals: debits vs credits, both shown, which visibly stay equal during the duplicate fault. This is the key insight: "balanced ≠ correct".
+   - The 7 integrity checks as pass/fail chips.
+   - Transaction volume counter or sparkline. Account balances table.
+2. **Attack Simulator**
+   - Buttons: Start/Stop traffic, Inject Duplicate Settlement, Inject Missing Settlement, Inject Tampered Settlement, Reset to healthy baseline.
+   - Each button shows the backend response or a 409 error inline.
+   - Missing and tampered may return 409/501 until the backend ships them (P2). Show "coming soon" only when the backend returns 501.
+3. **Incident Investigation** (shown when an incident exists; it auto-focuses on the newest)
+   - A status stepper: detected → investigating → contained → validating → awaiting_approval → correcting → resolved.
+   - Root cause card: service, summary, confidence, and a method badge. A badge reading "Deterministic" must say exactly that; never label it AI.
+   - Affected payments, financial impact (`impact_minor`, large), and lineage (instruction → events → entries as a small tree).
+   - An evidence timeline as a vertical list of `timeline` items. Containment card: quarantined service and held instructions count.
+4. **Recovery Sandbox**
+   - The proposal description and compensating entries table.
+   - Balances before/after from `sandbox.balances_before/after`, with only changed accounts highlighted.
+   - `checks_before` vs `checks_after`, side by side.
+   - Sandbox PASSED/FAILED banner.
+   - Approval controls: an approver select (`ops.lead@bank`, `treasury@bank`, plus `blackbox-agent` to show the 403 rejection on stage), and Approve / Reject buttons. They are enabled only in `awaiting_approval`.
+5. **Recovery Verification**
+   - Applied corrections: the compensation entries with `corrects_entry_id` linking to the original, and a note that the original is preserved.
+   - Final `verification` checks (all green) and a big "INTEGRITY RESTORED" when the incident is `resolved`.
+   - A "Release settlement-svc" button.
+   - The audit history table (`/api/audit`).
 
-## UI acceptance
-Normal → drain → wire frozen → phone Deny → AED 450,000 protected → reset, repeat. Verify visual state on both routes, empty data, action errors, Arabic RTL, reconnect and reset cancellation. No unsupported “<1s verified” claim; backend measures enforcement latency separately.
+## Mock mode
+Until the backend is live, `VITE_USE_MOCK=true` reads `frontend/src/mock/*.json` that you create from the contract shapes and plays a scripted SSE sequence. Remove mock mode from the demo build; the demo uses the live backend only.
+
+## Acceptance (run from the live backend)
+Reset → Start traffic → Inject Duplicate → the status bar turns VIOLATED and the "×2" payment appears → the incident steps run on their own up to awaiting_approval → the sandbox shows PASSED → approving as `blackbox-agent` gives a visible 403 → approving as `ops.lead@bank` → RESOLVED, INTEGRITY RESTORED, 7/7 checks → Release → held payments settle → Reset. Do it 3 times in a row without a page reload.
