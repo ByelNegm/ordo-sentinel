@@ -44,14 +44,23 @@ This kept the concurrent sessions aligned without a human relaying context betwe
   - kept the discontinued code in `legacy/ordo_sentinel/` and in git history. No force-push or history rewrite.
 - Contract and brief were ready about 6 minutes after the pivot decision (PROGRESS.md 13:14 → 13:20), and the UI session started immediately.
 
-## 6. Test and verification evidence
+## 6. Partners used
+| Partner | How it's used |
+|---|---|
+| **Devin** | Parallel builder sessions per module under a lead session, an independent review-gate session, Devin Review on PRs, and the colleague's separate UI session. |
+| **Daytona** | In the product: the recovery sandbox's 7 integrity checks also run in a private Daytona cloud sandbox, and the result is compared with the local run. The SANDBOX PASSED card shows "Daytona sandbox <short id> · remote checks match". If Daytona is unreachable, it falls back to local within 8s and the badge says so; approval still depends on local validation. |
+| **Graphify** | Engineering evidence: a code-only knowledge graph of BLACKBOX in `docs/graphify/` (337 nodes, 1,147 edges, zero LLM tokens). It includes query results tracing approve → ledger append and sandbox → copied ledger. See [PR #9](https://github.com/ByelNegm/ordo-sentinel/pull/9), branch `docs/graphify`. |
+
+## 7. Test and verification evidence
 | Item | Result |
 |---|---|
-| Backend pytest (`cd backend && pytest -q`) | 64 passed |
-| UI tests | 26 passed |
+| Backend pytest (`cd backend && pytest -q`) | 77 passed |
+| UI tests | 31 passed |
 | Live curl flows: duplicate, missing, tamper | All 3 passed: reset → detection → sandbox → agent 403 → approval → idempotent repeat → 7/7 → release (1 held payment released) |
 | UI acceptance (Playwright, live backend) | Full duplicate flow passed through the console |
-| UI timing, 5 consecutive runs in one page with no reload | All PASS. Duplicate inject → awaiting_approval 5.3–5.7s, full cycle about 8s; missing 8.9s / 11.6s; tamper 5.9s / 8.4s |
+| UI timing with Daytona | Inject → awaiting_approval about 7s |
+| UI timing, pre-Daytona, 5 consecutive runs in one page with no reload | All PASS. Duplicate inject → awaiting_approval 5.3–5.7s, full cycle about 8s; missing 8.9s / 11.6s; tamper 5.9s / 8.4s |
+| Code graph (Graphify) | 337 nodes, 1,147 edges; approve → ledger append and sandbox → copied ledger paths traced |
 | Sandbox challenge | Unsafe fixes rejected with truthful reasons (Lineage Guard for reverse original; ledger guard for wrong amount); real ledger unchanged; approving the agent's proposal afterwards restores 7/7 |
 | Review gate | P0 PASSED; P2 MUST_FIX fixed (409 gate, `f13b2e4`) |
 | Devin Review on PR #7 | 3 bugs found, all resolved |
