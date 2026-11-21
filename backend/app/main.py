@@ -30,7 +30,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Ordo Sentinel", lifespan=lifespan)
     app.state.bank, app.state.bus, app.state.runner = bank, bus, runner
-    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
+    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                        allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
     app.mount("/fixtures", StaticFiles(directory=FIXTURES), name="fixtures")
 

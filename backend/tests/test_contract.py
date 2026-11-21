@@ -131,10 +131,11 @@ def test_policy_boundaries(value, expected):
     assert decide(risk, PolicyContext(520000, 156001)) == "freeze"
 
 
-def test_cors(client):
+@pytest.mark.parametrize("origin", ["http://localhost:5173", "http://127.0.0.1:5173"])
+def test_cors(client, origin):
     response = client.options("/api/reset", headers={
-        "Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
-    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+        "Origin": origin, "Access-Control-Request-Method": "POST"})
+    assert response.headers["access-control-allow-origin"] == origin
 
 
 @pytest.fixture
