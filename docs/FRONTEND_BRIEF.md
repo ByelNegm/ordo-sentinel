@@ -50,7 +50,7 @@ You may create frontend-local config/dependencies as needed during implementatio
 - 13:45: integrate both routes with backend.
 - 14:45: feature freeze.
 - 15:00: Cap five-minute recording; 15:30 GitHub + video submission; 16:00 deadline.
-Use ui/* branches; backend uses api/*; PRs target main. Remote does not exist yet: local work only until owner creates it. Show parallel Devin sessions in video. Optional Daytona only if ≤20 minutes; skip Graphify/Collabute unless instant win.
+Use ui/* branches; backend uses api/*; PRs target main. Repo: https://github.com/ByelNegm/ordo-sentinel (clone it; work on ui/* branches). Show parallel Devin sessions in video. Optional Daytona only if ≤20 minutes; skip Graphify/Collabute unless instant win.
 
 ## UI acceptance
 Normal → drain → wire frozen → phone Deny → AED 450,000 protected → reset, repeat. Verify visual state on both routes, empty data, action errors, Arabic RTL, reconnect and reset cancellation. No unsupported “<1s verified” claim; backend measures enforcement latency separately.
