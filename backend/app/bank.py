@@ -1,14 +1,13 @@
 """Process-local bank. Mutations are synchronous on the app event loop."""
 
 from collections import Counter
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from random import Random
 from statistics import mean, pstdev
 
-from . import risk
 from .models import Account, AccountUpdated, Alert, AlertResolved, Counterparty, Risk, State, Txn
+from .risk import CustomerBaseline, RiskContext
 
 # main.py uses this to serve the development fixtures.
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -23,25 +22,6 @@ CAFE = Counterparty(name="Corner Café", iban="AE000000000000000000005",
                      country="AE", is_new=False, offshore=False)
 UTILITY = Counterparty(name="City Utilities", iban="AE000000000000000000006",
                         country="AE", is_new=False, offshore=False)
-
-
-@dataclass(frozen=True)
-class Baseline:
-    hour_histogram: list[int]
-    amount_mean: float
-    amount_std: float
-    known_payees: frozenset[str]
-    known_devices: frozenset[str]
-    known_clients: frozenset[str]
-    known_api_clients: frozenset[str]
-
-
-class _BankRiskContext(risk.RiskContext):
-    """Carry the baseline even when running against the skeleton scorer."""
-
-    def __init__(self, balance: float, cumulative: float, recent: list[Txn], baseline: Baseline) -> None:
-        super().__init__(balance, cumulative, recent)
-        self.baseline = baseline
 
 
 def _seed_history() -> tuple[Txn, ...]:
@@ -79,16 +59,14 @@ def _catalog() -> list[Txn]:
         ("txn_drain_002", 1800, "New Services B", "AE000000000000000000003", "AE"),
         ("txn_wire", 450000, "Pelagic Holdings", "SC000000000000000000004", "SC"),
     )):
-        # Input placeholder until Builder A lands: the skeleton score() echoes its input.
-        # The wire freeze already follows the live policy's cumulative outflow limit.
-        risk = Risk(score=40, level="medium", factors=[])
         script.append(Txn(
             id=txn_id, ts=DRAIN_START + timedelta(seconds=step), amount=amount,
             currency="AED", direction="out",
             counterparty=Counterparty(name=name, iban=iban, country=country,
                                       is_new=True, offshore=country != "AE"),
             channel="api", client_id="api_partner_7", device_id="device_api_new",
-            risk=risk, decision="hold" if country == "AE" else "freeze",
+            risk=Risk(score=0, level="low", factors=[]),
+            decision="hold" if country == "AE" else "freeze",
             status="held" if country == "AE" else "blocked",
         ))
     return script
@@ -114,16 +92,15 @@ class Bank:
         self.history = _seed_history()
         amounts = [txn.amount for txn in self.history]
         hours = Counter(txn.ts.hour for txn in self.history)
-        self.baseline = Baseline(
+        self.baseline = CustomerBaseline(
             hour_histogram=[hours[hour] for hour in range(24)],
             amount_mean=mean(amounts), amount_std=pstdev(amounts),
-            known_payees=frozenset(txn.counterparty.iban for txn in self.history),
-            known_devices=frozenset(txn.device_id for txn in self.history),
-            known_clients=frozenset(txn.client_id for txn in self.history),
-            known_api_clients=frozenset(txn.client_id for txn in self.history if txn.channel == "api"),
+            known_payees={txn.counterparty.iban for txn in self.history},
+            known_devices={txn.device_id for txn in self.history},
+            known_api_clients={txn.client_id for txn in self.history if txn.channel == "api"},
         )
         self.catalog = _catalog()
-        self.known_clients = set(self.baseline.known_clients)
+        self.known_clients = {txn.client_id for txn in self.history}
         self.transactions: dict[str, Txn] = {}
         self.alerts: dict[str, Alert] = {}
         self.resolutions: dict[str, AlertResolved] = {}
@@ -153,21 +130,12 @@ class Bank:
             amount += candidate.amount
         return round(amount, 2)
 
-    def risk_context(self, candidate: Txn) -> risk.RiskContext:
+    def risk_context(self, candidate: Txn) -> RiskContext:
         recent = self.recent_transactions(candidate)
-        balance = self.state.account.balance
-        cumulative = self.cumulative_outflow(candidate, recent)
-        baseline_type = getattr(risk, "CustomerBaseline", None)
-        if baseline_type is None:
-            return _BankRiskContext(balance, cumulative, recent, self.baseline)
-        baseline = baseline_type(
-            hour_histogram=self.baseline.hour_histogram.copy(),
-            amount_mean=self.baseline.amount_mean, amount_std=self.baseline.amount_std,
-            known_payees=set(self.baseline.known_payees), known_devices=set(self.baseline.known_devices),
-            known_api_clients=set(self.baseline.known_api_clients),
+        return RiskContext(
+            balance=self.state.account.balance, cumulative_drain=self.cumulative_outflow(candidate, recent),
+            recent_transactions=recent, baseline=self.baseline,
         )
-        return risk.RiskContext(balance=balance, cumulative_drain=cumulative,
-                                recent_transactions=recent, baseline=baseline)
 
     def _available(self) -> None:
         account = self.state.account

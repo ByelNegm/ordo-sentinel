@@ -28,7 +28,7 @@ def test_seed_history_and_reset_are_repeatable():
     assert len(history) == sum(baseline.hour_histogram) == 180
     assert baseline.hour_histogram[13] > 0 and baseline.hour_histogram[2] == 0
     assert baseline.amount_mean > 0 and baseline.amount_std > 0
-    assert "app_aisha" in baseline.known_clients
+    assert "app_aisha" in bank.known_clients
     assert baseline.known_api_clients == {"api_aisha_bills"}
     assert bank.catalog[0].counterparty.iban in baseline.known_payees
     assert bank.catalog[0].device_id in baseline.known_devices
@@ -69,7 +69,7 @@ def test_risk_window_counts_outgoing_attempts_of_each_status_and_candidate_once(
     assert [txn.id for txn in context.recent_transactions] == ["posted", "held", "blocked", "inbound"]
     assert context.cumulative_drain == 450_050
     assert context.balance == bank.snapshot().account.balance
-    assert wire.client_id not in bank.baseline.known_clients
+    assert wire.client_id not in bank.baseline.known_api_clients
 
 
 def test_grouped_confirm_is_atomic_and_preserves_cents():
